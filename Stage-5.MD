@@ -191,3 +191,26 @@ public class AppDbContext : DbContext
             .ToListAsync();
     }
 }
+
+
+
+
+CREATE TABLE Tasks (
+    Id TEXT PRIMARY KEY,
+    Title TEXT NOT NULL,
+    Description TEXT,
+    StartDate TEXT NOT NULL,
+    EndDate TEXT NOT NULL,
+    Color TEXT NOT NULL
+);
+
+CREATE TABLE SubTasks (
+    Id TEXT PRIMARY KEY,
+    TaskId TEXT NOT NULL,
+    Title TEXT NOT NULL,
+    Description TEXT,
+    StartDate TEXT NOT NULL,
+    EndDate TEXT NOT NULL,
+    Color TEXT NOT NULL,
+    FOREIGN KEY(TaskId) REFERENCES Tasks(Id)
+);
