@@ -257,3 +257,160 @@
         }
     </div>
 }
+
+
+
+
+
+----
+
+
+@foreach (var task in Tasks)
+{
+    <div class="timeline-row">
+        <div class="task-title border-end border-bottom"></div> <!-- Пустой заголовок -->
+
+        @for (int i = 0; i < DaysInMonth.Count; i++)
+        {
+            <div class="timeline-cell"></div>
+        }
+
+        @if (TryGetSpan(task, out var colStart, out var colEnd))
+        {
+            <div class="timeline-bar"
+                 style="background-color: @task.Color;"
+                 style="@($"grid-column: {colStart} / {colEnd};")"
+                 @onclick="@(() => ToggleExpand(task.Id))">
+                @task.Title
+            </div>
+        }
+    </div>
+
+    @if (expandedTasks.Contains(task.Id))
+    {
+        foreach (var sub in task.SubTasks)
+        {
+            <div class="timeline-row">
+                <div class="task-title border-end border-bottom"></div>
+
+                @for (int i = 0; i < DaysInMonth.Count; i++)
+                {
+                    <div class="timeline-cell"></div>
+                }
+
+                @if (TryGetSpan(sub, out var sColStart, out var sColEnd))
+                {
+                    <div class="timeline-bar bg-secondary text-white"
+                         style="@($"grid-column: {sColStart} / {sColEnd};")">
+                        @sub.Title
+                    </div>
+                }
+            </div>
+        }
+    }
+}
+
+private bool TryGetSpan(TaskBase task, out int colStart, out int colEnd)
+{
+    var startIndex = DaysInMonth.FindIndex(d => d.Date == task.StartDate.Date);
+    var endIndex = DaysInMonth.FindIndex(d => d.Date == task.EndDate.Date);
+
+    if (startIndex != -1 && endIndex != -1)
+    {
+        colStart = startIndex + 2; // +2, потому что первая колонка — заголовок задачи
+        colEnd = endIndex + 3;
+        return true;
+    }
+
+    colStart = colEnd = 0;
+    return false;
+}
+
+.timeline-container {
+    overflow-x: auto;
+    border: 1px solid #dee2e6;
+}
+
+.timeline-grid {
+    display: grid;
+    grid-template-columns: 200px repeat(31, 40px); /* 31 день */
+    grid-auto-rows: 35px;
+    font-size: 0.85rem;
+    min-width: max-content;
+    position: relative;
+}
+
+.timeline-header {
+    display: contents;
+}
+
+.timeline-date {
+    padding: 5px;
+    font-weight: bold;
+    background: #f8f9fa;
+    text-align: center;
+    border-right: 1px solid #dee2e6;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.timeline-row {
+    display: contents;
+}
+
+.task-title {
+    border-right: 1px solid #dee2e6;
+    border-bottom: 1px solid #dee2e6;
+    background: #fff;
+}
+
+.timeline-cell {
+    border-right: 1px solid #dee2e6;
+    border-bottom: 1px solid #dee2e6;
+    height: 35px;
+}
+
+.timeline-bar {
+    position: absolute;
+    height: 35px;
+    display: flex;
+    align-items: center;
+    justify-content: start;
+    padding-left: 5px;
+    font-weight: 500;
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 1;
+    border-radius: 3px;
+}
+
+@code {
+    private List<TaskItem> Tasks = new();
+    private List<DateTime> DaysInMonth = new();
+    private HashSet<int> expandedTasks = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        Tasks = await TaskService.GetTasksAsync();
+
+        var start = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var end = start.AddMonths(1).AddDays(-1);
+        DaysInMonth = Enumerable.Range(0, (end - start).Days + 1)
+            .Select(offset => start.AddDays(offset)).ToList();
+    }
+
+    private void ToggleExpand(int taskId)
+    {
+        if (expandedTasks.Contains(taskId))
+            expandedTasks.Remove(taskId);
+        else
+            expandedTasks.Add(taskId);
+    }
+}
