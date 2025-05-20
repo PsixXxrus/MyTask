@@ -414,3 +414,35 @@ private bool TryGetSpan(TaskBase task, out int colStart, out int colEnd)
             expandedTasks.Add(taskId);
     }
 }
+
+
+
+public interface ITimeBound
+{
+    DateTime StartDate { get; }
+    DateTime EndDate { get; }
+}
+
+
+public class TaskItem : ITimeBound { /* ... */ }
+public class SubTaskItem : ITimeBound { /* ... */ }
+
+
+
+
+
+private bool TryGetSpan(ITimeBound item, out int colStart, out int colEnd)
+{
+    var startIndex = DaysInMonth.FindIndex(d => d.Date == item.StartDate.Date);
+    var endIndex = DaysInMonth.FindIndex(d => d.Date == item.EndDate.Date);
+
+    if (startIndex != -1 && endIndex != -1)
+    {
+        colStart = startIndex + 2;
+        colEnd = endIndex + 3;
+        return true;
+    }
+
+    colStart = colEnd = 0;
+    return false;
+}
