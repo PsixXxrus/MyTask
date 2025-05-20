@@ -161,3 +161,99 @@
         ...
     }
 }
+
+.timeline-container {
+    overflow-x: auto;
+    border: 1px solid #dee2e6;
+}
+
+.timeline-grid {
+    display: grid;
+    grid-template-columns: 200px repeat(31, 40px); /* по умолчанию 31 день, можно программно менять */
+    grid-auto-rows: minmax(35px, auto);
+    font-size: 0.9rem;
+    min-width: max-content;
+}
+
+.timeline-header {
+    display: contents;
+}
+
+.timeline-date {
+    padding: 5px;
+    font-weight: bold;
+    background: #f8f9fa;
+    text-align: center;
+    border-right: 1px solid #dee2e6;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.timeline-row {
+    display: contents;
+}
+
+.task-title {
+    background: #fff;
+    padding: 5px;
+    font-weight: 500;
+    white-space: nowrap;
+    border-right: 1px solid #dee2e6;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.timeline-cell {
+    border-right: 1px solid #dee2e6;
+    border-bottom: 1px solid #dee2e6;
+    height: 35px;
+    position: relative;
+    padding: 0;
+}
+
+.timeline-bar {
+    height: 100%;
+    width: 100%;
+    color: #fff;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+@foreach (var day in DaysInMonth)
+{
+    var isInRange = day >= task.StartDate.Date && day <= task.EndDate.Date;
+    bool isStart = day == task.StartDate.Date;
+
+    <div class="timeline-cell">
+        @if (isInRange)
+        {
+            <div class="timeline-bar" style="background-color: @task.Color;">
+                @if (isStart)
+                {
+                    @task.Title
+                }
+            </div>
+        }
+    </div>
+}
+
+@foreach (var day in DaysInMonth)
+{
+    var isInRange = day >= sub.StartDate.Date && day <= sub.EndDate.Date;
+    bool isStart = day == sub.StartDate.Date;
+
+    <div class="timeline-cell">
+        @if (isInRange)
+        {
+            <div class="timeline-bar bg-secondary">
+                @if (isStart)
+                {
+                    @sub.Title
+                }
+            </div>
+        }
+    </div>
+}
