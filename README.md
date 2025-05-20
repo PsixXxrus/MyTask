@@ -197,3 +197,24 @@ builder.Services.AddScoped<TaskService>();
 }
 
 ```
+
+-- Создание таблицы TaskItem
+CREATE TABLE TaskItem (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Title TEXT NOT NULL,
+    Description TEXT NOT NULL,
+    StartDate TEXT NOT NULL,     -- Храним дату как строку в ISO 8601
+    EndDate TEXT NOT NULL,
+    Color TEXT NOT NULL
+);
+
+-- Создание таблицы SubTaskItem
+CREATE TABLE SubTaskItem (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    TaskItemId INTEGER NOT NULL,
+    Title TEXT NOT NULL,
+    Description TEXT NOT NULL,
+    StartDate TEXT NOT NULL,
+    EndDate TEXT NOT NULL,
+    FOREIGN KEY (TaskItemId) REFERENCES TaskItem(Id) ON DELETE CASCADE
+);
