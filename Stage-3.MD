@@ -1,15 +1,13 @@
 ```c#
 
-@inject ITaskService TaskService
-
 <div class="timeline-container">
     <div class="timeline-grid">
-        <!-- Заголовок: дни месяца -->
+        <!-- Заголовок -->
         <div class="timeline-header">
             <div class="timeline-spacer"></div>
             @foreach (var day in DaysInMonth)
             {
-                <div class="timeline-date">@day.ToString("dd")</div>
+                <div class="timeline-date">@day:dd</div>
             }
         </div>
 
@@ -18,17 +16,18 @@
         {
             <div class="timeline-row">
                 <div class="timeline-spacer"></div>
+
                 @for (int i = 0; i < DaysInMonth.Count; i++)
                 {
-                    <div class="timeline-cell"></div>
-                }
-
-                @if (TryGetSpan(task, out var colStart, out var colEnd))
-                {
-                    <div class="timeline-bar"
-                         style="grid-column: @colStart / @colEnd; background-color:@task.Color;"
-                         @onclick="@(() => ToggleExpand(task.Id))">
-                        @task.Title
+                    <div class="timeline-cell">
+                        @if (DaysInMonth[i] >= task.StartDate.Date && DaysInMonth[i] <= task.EndDate.Date)
+                        {
+                            <div class="timeline-bar"
+                                 style="background-color:@task.Color"
+                                 @onclick="() => ToggleExpand(task.Id)">
+                                @task.Title
+                            </div>
+                        }
                     </div>
                 }
             </div>
@@ -42,14 +41,13 @@
                         <div class="timeline-spacer"></div>
                         @for (int i = 0; i < DaysInMonth.Count; i++)
                         {
-                            <div class="timeline-cell"></div>
-                        }
-
-                        @if (TryGetSpan(sub, out var subStart, out var subEnd))
-                        {
-                            <div class="timeline-bar subtask"
-                                 style="grid-column: @subStart / @subEnd;">
-                                @sub.Title
+                            <div class="timeline-cell">
+                                @if (DaysInMonth[i] >= sub.StartDate.Date && DaysInMonth[i] <= sub.EndDate.Date)
+                                {
+                                    <div class="timeline-bar subtask">
+                                        @sub.Title
+                                    </div>
+                                }
                             </div>
                         }
                     </div>
@@ -59,109 +57,64 @@
     </div>
 </div>
 
-@code {
-    private List<TaskItem> Tasks = new();
-    private List<DateTime> DaysInMonth = new();
-    private HashSet<int> ExpandedTasks = new();
-
-    protected override async Task OnInitializedAsync()
-    {
-        var now = DateTime.Today;
-        var start = new DateTime(now.Year, now.Month, 1);
-        var end = start.AddMonths(1).AddDays(-1);
-        DaysInMonth = Enumerable.Range(0, (end - start).Days + 1)
-            .Select(d => start.AddDays(d))
-            .ToList();
-
-        Tasks = await TaskService.GetTasksWithSubTasksAsync(start, end);
-    }
-
-    private void ToggleExpand(int taskId)
-    {
-        if (!ExpandedTasks.Add(taskId))
-            ExpandedTasks.Remove(taskId);
-    }
-
-    private bool TryGetSpan(ITimeBound item, out int colStart, out int colEnd)
-    {
-        var startIndex = DaysInMonth.FindIndex(d => d.Date == item.StartDate.Date);
-        var endIndex = DaysInMonth.FindIndex(d => d.Date == item.EndDate.Date);
-        if (startIndex != -1 && endIndex != -1)
-        {
-            colStart = startIndex + 2; // +2 из-за первой колонки
-            colEnd = endIndex + 3;
-            return true;
-        }
-
-        colStart = colEnd = 0;
-        return false;
-    }
-}
-
 
 .timeline-container {
     overflow-x: auto;
     border: 1px solid #dee2e6;
-    padding-bottom: 10px;
 }
 
 .timeline-grid {
-    display: grid;
-    grid-template-columns: 150px repeat(31, 40px);
-    grid-auto-rows: 35px;
-    position: relative;
+    display: flex;
+    flex-direction: column;
     min-width: max-content;
     font-size: 0.85rem;
 }
 
 .timeline-header {
-    display: contents;
+    display: flex;
+}
+
+.timeline-row {
+    display: flex;
+}
+
+.timeline-spacer {
+    width: 150px;
+    min-width: 150px;
+    border-right: 1px solid #dee2e6;
+    background: #f0f0f0;
+}
+
+.timeline-date, .timeline-cell {
+    width: 40px;
+    min-width: 40px;
+    height: 35px;
+    border: 1px solid #dee2e6;
+    text-align: center;
+    box-sizing: border-box;
 }
 
 .timeline-date {
     background: #f8f9fa;
-    text-align: center;
-    border-right: 1px solid #dee2e6;
-    border-bottom: 1px solid #dee2e6;
     font-weight: bold;
-    padding: 5px 0;
-}
-
-.timeline-spacer {
-    border-right: 1px solid #dee2e6;
-    border-bottom: 1px solid #dee2e6;
-    background: #fff;
-}
-
-.timeline-row {
-    display: contents;
-}
-
-.timeline-cell {
-    border-right: 1px solid #dee2e6;
-    border-bottom: 1px solid #dee2e6;
-    height: 35px;
 }
 
 .timeline-bar {
-    position: absolute;
-    height: 35px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    color: #fff;
-    z-index: 10;
-    border-radius: 4px;
-    cursor: pointer;
+    background-color: #007bff;
+    color: white;
+    width: 100%;
+    height: 100%;
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 3px;
+    box-sizing: border-box;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 0 6px;
+    border-radius: 3px;
+    cursor: pointer;
 }
 
 .timeline-bar.subtask {
-    height: 30px;
-    font-size: 0.75rem;
-    background-color: #6c757d !important;
+    background-color: #6c757d;
 }
