@@ -146,3 +146,70 @@ private bool TryGetGridColumns(ITimeBound item, out int startCol, out int endCol
     startCol = endCol = 0;
     return false;
 }
+
+//////
+
+<div class="timeline-container">
+    <div class="timeline-grid" style="grid-template-columns: 150px repeat(@DaysInMonth.Count, 40px);">
+        
+        <!-- Заголовок -->
+        <div class="timeline-spacer"></div>
+        @foreach (var day in DaysInMonth)
+        {
+            <div class="timeline-date">@day.ToString("dd.MM")</div>
+        }
+
+        @for (int taskRow = 0; taskRow < Tasks.Count; taskRow++)
+        {
+            var task = Tasks[taskRow];
+
+            <!-- Пустая первая колонка (отступ слева) -->
+            <div class="timeline-spacer"></div>
+
+            <!-- Пустые ячейки сетки -->
+            @for (int i = 0; i < DaysInMonth.Count; i++)
+            {
+                <div class="timeline-cell"></div>
+            }
+
+            <!-- Основная задача -->
+            @if (TryGetGridColumns(task, out var colStart, out var colEnd))
+            {
+                <div class="timeline-bar"
+                     style="grid-column: @(colStart + 2) / @(colEnd + 3); grid-row: @(taskRow + 2); background-color:@task.Color"
+                     @onclick="() => ToggleExpand(task.Id)">
+                    @task.Title
+                </div>
+            }
+
+            <!-- Подзадачи -->
+            if (ExpandedTasks.Contains(task.Id))
+            {
+                for (int subIndex = 0; subIndex < task.SubTasks.Count; subIndex++)
+                {
+                    var sub = task.SubTasks[subIndex];
+                    var subRow = taskRow + subIndex + 1;
+
+                    <!-- Пустая колонка -->
+                    <div class="timeline-spacer"></div>
+
+                    @for (int i = 0; i < DaysInMonth.Count; i++)
+                    {
+                        <div class="timeline-cell"></div>
+                    }
+
+                    @if (TryGetGridColumns(sub, out var subStart, out var subEnd))
+                    {
+                        <div class="timeline-bar subtask"
+                             style="grid-column: @(subStart + 2) / @(subEnd + 3); grid-row: @(subRow + 2);">
+                            @sub.Title
+                        </div>
+                    }
+                }
+
+                // Пропускаем строки под подзадачи
+                taskRow += task.SubTasks.Count;
+            }
+        }
+    </div>
+</div>
