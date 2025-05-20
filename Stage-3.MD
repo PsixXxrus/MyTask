@@ -1,4 +1,4 @@
-<div class="timeline-container">
+```c#<div class="timeline-container">
     <div class="timeline-grid">
         <!-- Заголовок дат -->
         <div class="timeline-header">
