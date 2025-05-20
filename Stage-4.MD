@@ -1,4 +1,4 @@
-'''C#
+```c#
 
 <div class="timeline-container">
     <div class="timeline-grid" style="grid-template-columns: 150px repeat(@DaysInMonth.Count, 40px);">
