@@ -1,9 +1,8 @@
 ```c#
+@page "/"
 
 <div class="timeline-container">
     <div class="timeline-grid" style="grid-template-columns: repeat(@DaysInMonth.Count, 40px);">
-        
-        <!-- Заголовок -->
         @foreach (var day in DaysInMonth)
         {
             <div class="timeline-date">@day.ToString("dd.MM")</div>
@@ -11,7 +10,7 @@
 
         @for (int i = 0; i < RenderItems.Count; i++)
         {
-            var item = RenderItems[i];
+            var (item, isSubtask) = RenderItems[i];
 
             @for (int d = 0; d < DaysInMonth.Count; d++)
             {
@@ -20,7 +19,7 @@
 
             @if (TryGetGridColumns(item, out var colStart, out var colEnd))
             {
-                <div class="timeline-bar @(item is SubTaskItem ? "subtask" : "")"
+                <div class="timeline-bar @(isSubtask ? "subtask" : "")"
                      style="grid-column: @(colStart + 1) / @(colEnd + 2); grid-row: @(i + 2); background-color:@item.Color"
                      @onclick="() => OnBarClick(item)">
                     @item.Title
@@ -30,34 +29,37 @@
     </div>
 </div>
 
-
 @code {
-    private List<DateTime> DaysInMonth = Enumerable.Range(1, DateTime.DaysInMonth(CurrentYear, CurrentMonth))
-        .Select(day => new DateTime(CurrentYear, CurrentMonth, day)).ToList();
-
     private List<TaskItem> Tasks = new();
+
     private HashSet<Guid> ExpandedTasks = new();
 
-    private int CurrentMonth = DateTime.Today.Month;
     private int CurrentYear = DateTime.Today.Year;
+    private int CurrentMonth = DateTime.Today.Month;
 
-    private List<ITimeBound> RenderItems => GetRenderItems();
+    private List<DateTime> DaysInMonth => Enumerable
+        .Range(1, DateTime.DaysInMonth(CurrentYear, CurrentMonth))
+        .Select(day => new DateTime(CurrentYear, CurrentMonth, day))
+        .ToList();
 
-    private List<ITimeBound> GetRenderItems()
+    private List<(ITaskBound Item, bool IsSubtask)> RenderItems => BuildRenderItems();
+
+    private List<(ITaskBound Item, bool IsSubtask)> BuildRenderItems()
     {
-        var items = new List<ITimeBound>();
+        var list = new List<(ITaskBound, bool)>();
         foreach (var task in Tasks)
         {
-            items.Add(task);
+            list.Add((task, false));
             if (ExpandedTasks.Contains(task.Id))
             {
-                items.AddRange(task.SubTasks);
+                foreach (var sub in task.SubTasks)
+                    list.Add((sub, true));
             }
         }
-        return items;
+        return list;
     }
 
-    private void OnBarClick(ITimeBound item)
+    private void OnBarClick(ITaskBound item)
     {
         if (item is TaskItem task)
         {
@@ -68,64 +70,58 @@
         }
     }
 
-    private bool TryGetGridColumns(ITimeBound item, out int startCol, out int endCol)
+    private bool TryGetGridColumns(ITaskBound item, out int startCol, out int endCol)
     {
         startCol = DaysInMonth.FindIndex(d => d.Date == item.StartDate.Date);
         endCol = DaysInMonth.FindIndex(d => d.Date == item.EndDate.Date);
         return startCol != -1 && endCol != -1;
     }
-}
 
-public interface ITimeBound
-{
-    Guid Id { get; }
-    string Title { get; }
-    DateTime StartDate { get; }
-    DateTime EndDate { get; }
-    string Color { get; }
-}
+    protected override void OnInitialized()
+    {
+        // Для примера — загрузим тестовые задачи
+        Tasks = SampleTasks();
+    }
 
-.timeline-container {
-    overflow-x: auto;
-    border: 1px solid #dee2e6;
-}
-
-.timeline-grid {
-    display: grid;
-    grid-auto-rows: 35px;
-    min-width: max-content;
-    position: relative;
-}
-
-.timeline-date {
-    border: 1px solid #dee2e6;
-    background: #f8f9fa;
-    text-align: center;
-    font-weight: bold;
-    font-size: 0.75rem;
-    line-height: 35px;
-}
-
-.timeline-cell {
-    border: 1px solid #dee2e6;
-    background-color: #fff;
-}
-
-.timeline-bar {
-    display: flex;
-    align-items: center;
-    padding-left: 8px;
-    color: #fff;
-    font-weight: 500;
-    font-size: 0.8rem;
-    height: 35px;
-    overflow: hidden;
-    white-space: nowrap;
-    border-radius: 4px;
-    cursor: pointer;
-    z-index: 10;
-}
-
-.timeline-bar.subtask {
-    background-color: #6c757d !important;
+    private List<TaskItem> SampleTasks()
+    {
+        return new List<TaskItem>
+        {
+            new TaskItem
+            {
+                Title = "Проект А",
+                Description = "Основная задача проекта А",
+                StartDate = new DateTime(CurrentYear, CurrentMonth, 1),
+                EndDate = new DateTime(CurrentYear, CurrentMonth, 5),
+                Color = "#28a745",
+                SubTasks = new List<SubTaskItem>
+                {
+                    new SubTaskItem
+                    {
+                        Title = "Анализ",
+                        Description = "Подзадача анализа",
+                        StartDate = new DateTime(CurrentYear, CurrentMonth, 2),
+                        EndDate = new DateTime(CurrentYear, CurrentMonth, 3),
+                        Color = "#20c997"
+                    },
+                    new SubTaskItem
+                    {
+                        Title = "Дизайн",
+                        Description = "Подзадача дизайна",
+                        StartDate = new DateTime(CurrentYear, CurrentMonth, 4),
+                        EndDate = new DateTime(CurrentYear, CurrentMonth, 5),
+                        Color = "#17a2b8"
+                    }
+                }
+            },
+            new TaskItem
+            {
+                Title = "Проект Б",
+                Description = "Основная задача проекта Б",
+                StartDate = new DateTime(CurrentYear, CurrentMonth, 10),
+                EndDate = new DateTime(CurrentYear, CurrentMonth, 15),
+                Color = "#dc3545"
+            }
+        };
+    }
 }
