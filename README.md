@@ -159,4 +159,41 @@ builder.Services.AddDbContext<PlannerDbContext>(options =>
 
 builder.Services.AddScoped<TaskService>();
 
+
+@page "/tasks"
+@inject TaskService TaskService
+
+<h3>План задач</h3>
+
+@foreach (var task in tasks)
+{
+    <div class="card my-3">
+        <div class="card-header bg-primary text-white">
+            <strong>@task.Title</strong> (@task.StartDate.ToShortDateString() - @task.EndDate.ToShortDateString())
+        </div>
+        <div class="card-body">
+            <p>@task.Description</p>
+            <ul class="list-group">
+                @foreach (var sub in task.SubTasks)
+                {
+                    <li class="list-group-item">
+                        <strong>@sub.Title:</strong> @sub.Description
+                        <br />
+                        <small>Срок: @sub.StartDate.ToShortDateString() - @sub.EndDate.ToShortDateString()</small>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+}
+
+@code {
+    private List<TaskItem> tasks = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        tasks = await TaskService.GetTasksAsync();
+    }
+}
+
 ```
