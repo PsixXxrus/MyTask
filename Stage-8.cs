@@ -1,29 +1,30 @@
-@inject TaskService TaskService
+@inject TaskService taskService
 @inject IJSRuntime JS
 
 <div class="timeline-container">
     <div class="timeline-header">
-        @for (int i = 0; i < TotalDays; i++)
+        @for (int i = 0; i < totalDays; i++)
         {
             <div class="timeline-cell timeline-header-cell">
-                @(TimelineStartDate.AddDays(i).ToString("dd.MM"))
+                @(timelineStartDate.AddDays(i).ToString("dd.MM"))
             </div>
         }
     </div>
 
-    @foreach (var task in Tasks)
+    @foreach (var task in tasks)
     {
         <div class="timeline-row">
-            <div class="task-bar"
+            <div class="task-bar @(selectedTask?.Id == task.Id ? "selected" : "")"
                  @ref="taskRefs[task.Id]"
                  style="@GetTaskStyle(task)"
-                 @onclick="() => SetSelectedTask(task)"
+                 @onclick="() => ToggleTask(task)"
+                 @ondblclick="() => EditTask(task)"
                  @onmousedown="() => InitJsInterop(task)">
                 @task.Title
             </div>
         </div>
 
-        @if (ExpandedTasks.Contains(task.Id))
+        @if (expandedTasks.Contains(task.Id))
         {
             foreach (var sub in task.SubTasks)
             {
@@ -38,65 +39,91 @@
     }
 </div>
 
-@code {
-    private List<TaskItem> Tasks = new();
-    private Dictionary<Guid, ElementReference> taskRefs = new();
-    private HashSet<Guid> ExpandedTasks = new();
-    private TaskItem? SelectedTask;
+<TaskEditor @bind-Visible="editorVisible"
+            Task="editingTask"
+            OnClose="CloseEditor"
+            OnSaved="ReloadTasks" />
 
-    private int DayWidthPx = 30;
-    private DateTime TimelineStartDate = new DateTime(2025, 5, 1);
-    private int TotalDays = 30;
+@code {
+    private List<TaskItem> tasks = new();
+    private Dictionary<Guid, ElementReference> taskRefs = new();
+    private HashSet<Guid> expandedTasks = new();
+    private TaskItem? selectedTask;
+    private TaskItem? editingTask;
+    private bool editorVisible = false;
+
+    private int dayWidth = 30;
+    private DateTime timelineStartDate = new DateTime(2025, 5, 1);
+    private int totalDays = 30;
 
     protected override async Task OnInitializedAsync()
     {
-        Tasks = await TaskService.GetAllTasksWithSubTasksAsync();
-        taskRefs = Tasks.ToDictionary(t => t.Id, _ => default(ElementReference));
+        await ReloadTasks();
+    }
+
+    private async Task ReloadTasks()
+    {
+        tasks = await taskService.GetAllTasksAsync();
+        taskRefs = tasks.ToDictionary(t => t.Id, _ => default(ElementReference));
+        StateHasChanged();
     }
 
     private string GetTaskStyle(ITaskBound task)
     {
-        var offset = (task.StartDate - TimelineStartDate).Days;
+        var offset = (task.StartDate - timelineStartDate).Days;
         var span = (task.EndDate - task.StartDate).Days + 1;
-
-        return $"left:{offset * DayWidthPx}px; width:{span * DayWidthPx}px; background-color:{task.Color};";
+        return $"left:{offset * dayWidth}px; width:{span * dayWidth}px; background-color:{task.Color};";
     }
 
-    private void SetSelectedTask(TaskItem task)
+    private void ToggleTask(TaskItem task)
     {
-        SelectedTask = task;
-
-        if (ExpandedTasks.Contains(task.Id))
-            ExpandedTasks.Remove(task.Id);
+        if (selectedTask?.Id == task.Id)
+            selectedTask = null;
         else
-            ExpandedTasks.Add(task.Id);
+            selectedTask = task;
+
+        if (expandedTasks.Contains(task.Id))
+            expandedTasks.Remove(task.Id);
+        else
+            expandedTasks.Add(task.Id);
+    }
+
+    private void EditTask(TaskItem task)
+    {
+        editingTask = task;
+        editorVisible = true;
+    }
+
+    private void CloseEditor()
+    {
+        editingTask = null;
+        editorVisible = false;
     }
 
     private async Task InitJsInterop(TaskItem task)
     {
-        SelectedTask = task;
-        var dotNetRef = DotNetObjectReference.Create(this);
-        await JS.InvokeVoidAsync("taskTimeline.initResizableDraggable", taskRefs[task.Id], dotNetRef, DayWidthPx);
+        selectedTask = task;
+        var dotnetRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("taskTimeline.initResizableDraggable", taskRefs[task.Id], dotnetRef, dayWidth);
     }
 
     [JSInvokable]
     public async Task OnDragOrResize(string direction, int deltaDays)
     {
-        if (SelectedTask == null || deltaDays == 0) return;
+        if (selectedTask == null || deltaDays == 0) return;
 
         if (direction == "left")
-            SelectedTask.StartDate = SelectedTask.StartDate.AddDays(deltaDays);
+            selectedTask.StartDate = selectedTask.StartDate.AddDays(deltaDays);
         else if (direction == "right")
-            SelectedTask.EndDate = SelectedTask.EndDate.AddDays(deltaDays);
+            selectedTask.EndDate = selectedTask.EndDate.AddDays(deltaDays);
         else if (direction == "move")
         {
-            SelectedTask.StartDate = SelectedTask.StartDate.AddDays(deltaDays);
-            SelectedTask.EndDate = SelectedTask.EndDate.AddDays(deltaDays);
+            selectedTask.StartDate = selectedTask.StartDate.AddDays(deltaDays);
+            selectedTask.EndDate = selectedTask.EndDate.AddDays(deltaDays);
         }
 
-        await TaskService.SaveTaskAsync(SelectedTask);
-        Tasks = await TaskService.GetAllTasksWithSubTasksAsync();
-        StateHasChanged();
+        await taskService.SaveTaskAsync(selectedTask);
+        await ReloadTasks();
     }
 }
 
@@ -105,23 +132,22 @@ window.taskTimeline = {
     initResizableDraggable: function (element, dotNetRef, dayWidth) {
         const el = element;
         let startX = 0;
-        let originalLeft = 0;
-        let originalWidth = 0;
         let direction = null;
 
         el.onmousedown = function (e) {
             e.preventDefault();
             startX = e.clientX;
-            originalLeft = el.offsetLeft;
-            originalWidth = el.offsetWidth;
 
             const offsetX = e.offsetX;
-            direction = offsetX < 10 ? 'left' : (offsetX > originalWidth - 10 ? 'right' : 'move');
+            const width = el.offsetWidth;
+
+            if (offsetX < 10) direction = 'left';
+            else if (offsetX > width - 10) direction = 'right';
+            else direction = 'move';
 
             document.onmousemove = function (e) {
                 const deltaX = e.clientX - startX;
                 const deltaDays = Math.round(deltaX / dayWidth);
-
                 dotNetRef.invokeMethodAsync("OnDragOrResize", direction, deltaDays);
             };
 
@@ -134,35 +160,6 @@ window.taskTimeline = {
 };
 
 
-
-
-.timeline-container {
-    overflow-x: auto;
-    white-space: nowrap;
-    border: 1px solid #ccc;
-}
-
-.timeline-header {
-    display: flex;
-    background-color: #f8f9fa;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
-
-.timeline-header-cell {
-    min-width: 30px;
-    height: 30px;
-    text-align: center;
-    border-right: 1px solid #ddd;
-    font-size: 12px;
-}
-
-.timeline-row {
-    position: relative;
-    height: 35px;
-    border-bottom: 1px solid #eee;
-}
 
 .task-bar {
     position: absolute;
@@ -178,8 +175,12 @@ window.taskTimeline = {
     text-overflow: ellipsis;
 }
 
+.task-bar.selected {
+    outline: 2px solid yellow;
+}
+
 .subtask-bar {
-    opacity: 0.8;
+    opacity: 0.85;
     font-size: 11px;
     background-color: #6c757d !important;
 }
