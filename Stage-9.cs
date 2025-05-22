@@ -254,3 +254,37 @@ builder.Services.AddSingleton(manager);
         }
     </tbody>
 </table>
+
+
+
+@code {
+    private List<ScheduledTask> Tasks = new();
+
+    protected override void OnInitialized()
+    {
+        LoadTasks();  // Загружаем задачи при инициализации компонента
+    }
+
+    private void LoadTasks()
+    {
+        Tasks = TaskManager.GetAllTasks().ToList();  // Получаем все текущие задачи из менеджера
+    }
+
+    private void PauseTask(string id)
+    {
+        TaskManager.PauseTask(id);  // Приостанавливаем задачу
+        LoadTasks();                // Обновляем список задач
+    }
+
+    private void ResumeTask(string id)
+    {
+        TaskManager.ResumeTask(id); // Возобновляем задачу
+        LoadTasks();                // Обновляем список задач
+    }
+
+    private void DeleteTask(string id)
+    {
+        TaskManager.RemoveTask(id); // Удаляем задачу из списка
+        LoadTasks();                // Обновляем UI
+    }
+}
