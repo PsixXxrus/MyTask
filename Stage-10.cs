@@ -1,3 +1,24 @@
+
+<style>
+  .background {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background-image: url("data:image/svg+xml;utf8,
+      <svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'>
+        <image x='0' y='0' width='150' height='150' href='logo-sngb.png'/>
+        <image x='150' y='150' width='150' height='150' href='logo-sngb.png'/>
+      </svg>");
+    background-repeat: repeat;
+    background-size: 300px 300px;
+    filter: blur(10px) brightness(0.9);
+    z-index: 0;
+  }
+</style>
+
+
+
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
