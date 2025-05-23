@@ -17,30 +17,26 @@
       position: fixed;
       top: 0; left: 0;
       width: 100vw; height: 100vh;
-      display: grid;
-      grid-template-columns: repeat(auto-fill, 150px);
-      grid-template-rows: repeat(auto-fill, 150px);
       z-index: 0;
-      filter: blur(8px) brightness(0.9);
+      filter: blur(4px) brightness(0.9);
+    }
+
+    .row {
+      display: flex;
+    }
+
+    .row.even {
+      margin-left: 128px; /* сдвиг на пол-ячейки */
     }
 
     .cell {
-      width: 150px;
-      height: 150px;
+      width: 256px;
+      height: 256px;
+      background-image: url('logo-sngb.png');
       background-repeat: no-repeat;
       background-position: center;
-      background-size: 80px;
-      opacity: 0.15;
-    }
-
-    .cell.logo {
-      background-image: url('logo-sngb.png');
-    }
-
-    /* Шахматное чередование: только чётные строки и столбцы */
-    .background-grid > div:nth-child(4n + 1),
-    .background-grid > div:nth-child(4n + 4) {
-      background-image: none;
+      background-size: 100px;
+      opacity: 0.12;
     }
 
     .overlay {
@@ -90,24 +86,31 @@
 </head>
 <body>
 
-  <!-- Фон -->
-  <div class="background-grid">
-    <!-- Создаём много ячеек -->
-    <script>
-      for (let i = 0; i < 200; i++) {
-        document.write('<div class="cell logo"></div>');
-      }
-    </script>
-  </div>
-
+  <div class="background-grid" id="grid"></div>
   <div class="overlay"></div>
 
-  <!-- Основная карточка -->
   <div class="card">
     <h1>Сайт временно недоступен</h1>
     <p>Проводятся технические работы. Пожалуйста, попробуйте позже.</p>
     <a href="#" onclick="location.reload()">Обновить</a>
   </div>
+
+  <script>
+    const grid = document.getElementById('grid');
+    const rows = Math.ceil(window.innerHeight / 256) + 1;
+    const cols = Math.ceil(window.innerWidth / 256) + 2;
+
+    for (let i = 0; i < rows; i++) {
+      const row = document.createElement('div');
+      row.className = 'row' + (i % 2 === 0 ? ' even' : '');
+      for (let j = 0; j < cols; j++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        row.appendChild(cell);
+      }
+      grid.appendChild(row);
+    }
+  </script>
 
 </body>
 </html>
