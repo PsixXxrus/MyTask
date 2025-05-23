@@ -1,56 +1,53 @@
-
-<style>
-  .background {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background-image: url("data:image/svg+xml;utf8,
-      <svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'>
-        <image x='0' y='0' width='150' height='150' href='logo-sngb.png'/>
-        <image x='150' y='150' width='150' height='150' href='logo-sngb.png'/>
-      </svg>");
-    background-repeat: repeat;
-    background-size: 300px 300px;
-    filter: blur(10px) brightness(0.9);
-    z-index: 0;
-  }
-</style>
-
-
-
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Сайт временно недоступен</title>
+  <title>Сайт недоступен</title>
   <style>
-    body, html {
+    html, body {
       margin: 0;
       padding: 0;
       height: 100%;
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #f0f2f5;
       overflow: hidden;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background-color: #f0f2f5;
     }
 
-    .background {
-      position: absolute;
+    .background-grid {
+      position: fixed;
       top: 0; left: 0;
-      width: 100%; height: 100%;
-      background-image: url('logo-sngb.png');
-      background-repeat: repeat;
-      background-size: 150px;
-      filter: blur(10px) brightness(0.9);
+      width: 100vw; height: 100vh;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, 150px);
+      grid-template-rows: repeat(auto-fill, 150px);
       z-index: 0;
+      filter: blur(8px) brightness(0.9);
+    }
+
+    .cell {
+      width: 150px;
+      height: 150px;
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 80px;
+      opacity: 0.15;
+    }
+
+    .cell.logo {
+      background-image: url('logo-sngb.png');
+    }
+
+    /* Шахматное чередование: только чётные строки и столбцы */
+    .background-grid > div:nth-child(4n + 1),
+    .background-grid > div:nth-child(4n + 4) {
+      background-image: none;
     }
 
     .overlay {
-      position: absolute;
+      position: fixed;
       top: 0; left: 0;
-      width: 100%; height: 100%;
-      background-color: rgba(255, 255, 255, 0.6);
+      width: 100vw; height: 100vh;
+      background-color: rgba(255,255,255,0.5);
       z-index: 1;
     }
 
@@ -62,48 +59,55 @@
       padding: 30px;
       background: white;
       border-radius: 8px;
-      box-shadow: 0 0 20px rgba(0,0,0,0.1);
       text-align: center;
+      box-shadow: 0 0 20px rgba(0,0,0,0.1);
     }
 
     .card h1 {
-      margin-top: 0;
+      margin: 0 0 10px;
       color: #003366;
-      font-size: 24px;
     }
 
     .card p {
-      color: #444;
+      color: #333;
       font-size: 16px;
-      line-height: 1.5;
     }
 
     .card a {
-      display: inline-block;
       margin-top: 20px;
-      text-decoration: none;
-      color: #ffffff;
-      background-color: #003366;
+      display: inline-block;
       padding: 10px 20px;
-      border-radius: 5px;
+      background: #003366;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 4px;
     }
 
     .card a:hover {
-      background-color: #002244;
+      background: #002244;
     }
   </style>
 </head>
 <body>
-  <div class="background"></div>
+
+  <!-- Фон -->
+  <div class="background-grid">
+    <!-- Создаём много ячеек -->
+    <script>
+      for (let i = 0; i < 200; i++) {
+        document.write('<div class="cell logo"></div>');
+      }
+    </script>
+  </div>
+
   <div class="overlay"></div>
 
+  <!-- Основная карточка -->
   <div class="card">
     <h1>Сайт временно недоступен</h1>
-    <p>
-      В настоящее время ведутся технические работы или возникла непредвиденная ошибка.<br>
-      Пожалуйста, попробуйте обновить страницу позже.
-    </p>
-    <a href="#" onclick="location.reload();">Обновить</a>
+    <p>Проводятся технические работы. Пожалуйста, попробуйте позже.</p>
+    <a href="#" onclick="location.reload()">Обновить</a>
   </div>
+
 </body>
 </html>
