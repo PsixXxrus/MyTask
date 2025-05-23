@@ -18,25 +18,23 @@
       top: 0; left: 0;
       width: 100vw; height: 100vh;
       z-index: 0;
-      filter: blur(4px) brightness(0.9);
+      filter: blur(4px) brightness(0.95);
     }
 
     .row {
       display: flex;
     }
 
-    .row.even {
-      margin-left: 128px; /* сдвиг на пол-ячейки */
-    }
-
     .cell {
       width: 256px;
       height: 256px;
-      background-image: url('logo-sngb.png');
       background-repeat: no-repeat;
       background-position: center;
       background-size: 100px;
-      opacity: 0.12;
+    }
+
+    .cell.logo {
+      background-image: url('logo-sngb.png');
     }
 
     .overlay {
@@ -97,15 +95,19 @@
 
   <script>
     const grid = document.getElementById('grid');
-    const rows = Math.ceil(window.innerHeight / 256) + 1;
-    const cols = Math.ceil(window.innerWidth / 256) + 2;
+    const cellSize = 256;
+    const rows = Math.ceil(window.innerHeight / cellSize) + 1;
+    const cols = Math.ceil(window.innerWidth / cellSize) + 1;
 
     for (let i = 0; i < rows; i++) {
       const row = document.createElement('div');
-      row.className = 'row' + (i % 2 === 0 ? ' even' : '');
+      row.className = 'row';
       for (let j = 0; j < cols; j++) {
         const cell = document.createElement('div');
         cell.className = 'cell';
+        if ((i + j) % 2 === 0) {
+          cell.classList.add('logo'); // только в "белые" клетки
+        }
         row.appendChild(cell);
       }
       grid.appendChild(row);
