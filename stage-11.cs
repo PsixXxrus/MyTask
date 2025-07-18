@@ -1,3 +1,25 @@
+private class Model
+    {
+        public string UserName { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+    }
+    private Model model_InputeUser = new Model();
+
+    private async Task Authenticate()
+    {
+        User? userAccount = await accountServices.Authorization(model_InputeUser.UserName, model_InputeUser.Password);
+        if (userAccount == null)
+        {
+            await js.InvokeVoidAsync("alert", "Не верный логин или пароль");
+            return;
+        }
+
+        var customAuthStateProvider = (CustomAuthenticationStateProvider)authStateProvider;
+        await customAuthStateProvider.UpdateAuthenticationState(new UserSession(userAccount.Id, userAccount.Name, userAccount.CAccessRank.Code));
+        navManager.NavigateTo("/", true);
+    }
+
+
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 using System.Security.Claims;
