@@ -1,66 +1,77 @@
-using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
+using System.Net.Http.Headers;
 
-public class JwtAuthenticationStateProvider : AuthenticationStateProvider
+public class TokenService
 {
+    private readonly IHttpClientFactory _clientFactory;
     private readonly ProtectedSessionStorage _sessionStorage;
-    private ClaimsPrincipal _anonymous = new ClaimsPrincipal(new ClaimsIdentity());
-    private string? _cachedToken;
+    private readonly JwtAuthenticationStateProvider _authProvider;
+    private Timer? _refreshTimer;
 
-    public JwtAuthenticationStateProvider(ProtectedSessionStorage sessionStorage)
+    public TokenService(
+        IHttpClientFactory clientFactory,
+        ProtectedSessionStorage sessionStorage,
+        JwtAuthenticationStateProvider authProvider)
     {
+        _clientFactory = clientFactory;
         _sessionStorage = sessionStorage;
+        _authProvider = authProvider;
     }
 
-    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
+    public async Task InitializeAsync()
     {
-        try
-        {
-            if (_cachedToken == null)
-            {
-                var tokenResult = await _sessionStorage.GetAsync<string>("accessToken");
-                if (!tokenResult.Success || string.IsNullOrWhiteSpace(tokenResult.Value))
-                    return new AuthenticationState(_anonymous);
+        var tokenResult = await _sessionStorage.GetAsync<string>("accessToken");
+        if (!tokenResult.Success || string.IsNullOrEmpty(tokenResult.Value))
+            return;
 
-                _cachedToken = tokenResult.Value;
-            }
-
-            var identity = ParseClaimsFromJwt(_cachedToken);
-            var user = new ClaimsPrincipal(identity);
-            return new AuthenticationState(user);
-        }
-        catch
-        {
-            return new AuthenticationState(_anonymous);
-        }
+        ScheduleRefresh(tokenResult.Value);
     }
 
-    public async Task MarkUserAsAuthenticated(string token)
-    {
-        _cachedToken = token;
-        await _sessionStorage.SetAsync("accessToken", token);
-        var identity = ParseClaimsFromJwt(token);
-        var user = new ClaimsPrincipal(identity);
-        NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(user)));
-    }
-
-    public async Task MarkUserAsLoggedOut()
-    {
-        _cachedToken = null;
-        await _sessionStorage.DeleteAsync("accessToken");
-        var user = _anonymous;
-        NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(user)));
-    }
-
-    private ClaimsIdentity ParseClaimsFromJwt(string jwt)
+    private void ScheduleRefresh(string accessToken)
     {
         var handler = new JwtSecurityTokenHandler();
-        var token = handler.ReadJwtToken(jwt);
+        var token = handler.ReadJwtToken(accessToken);
+        var expires = token.ValidTo;
 
-        var claims = token.Claims.ToList();
+        var timeToExpiry = expires - DateTime.UtcNow;
 
-        return new ClaimsIdentity(claims, "jwt");
+        // Обновим за 1 минуту до истечения
+        var refreshIn = timeToExpiry - TimeSpan.FromMinutes(1);
+
+        if (refreshIn < TimeSpan.Zero)
+            refreshIn = TimeSpan.Zero;
+
+        _refreshTimer?.Dispose();
+        _refreshTimer = new Timer(async _ => await RefreshTokenAsync(), null, refreshIn, Timeout.InfiniteTimeSpan);
+    }
+
+    private async Task RefreshTokenAsync()
+    {
+        var refreshTokenResult = await _sessionStorage.GetAsync<string>("refreshToken");
+        if (!refreshTokenResult.Success || string.IsNullOrWhiteSpace(refreshTokenResult.Value))
+            return;
+
+        var client = _clientFactory.CreateClient("ServerAPI");
+
+        var response = await client.PostAsJsonAsync("auth/refresh", new
+        {
+            RefreshToken = refreshTokenResult.Value
+        });
+
+        if (response.IsSuccessStatusCode)
+        {
+            var data = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+            if (data != null && data.TryGetValue("accessToken", out var newToken))
+            {
+                await _sessionStorage.SetAsync("accessToken", newToken);
+                await _authProvider.MarkUserAsAuthenticated(newToken);
+                ScheduleRefresh(newToken);
+            }
+        }
+        else
+        {
+            await _authProvider.MarkUserAsLoggedOut(); // ❌ refresh не сработал — выходим
+        }
     }
 }
