@@ -1,110 +1,56 @@
-public class CustomsServiceController
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+
+public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 {
-    private readonly Dictionary<string, SemaphoreSlim> _taskLocks = new();
+    private readonly ProtectedSessionStorage _sessionStorage;
+    private ClaimsPrincipal _anonymous => new(new ClaimsIdentity());
 
-    private readonly object _lock = new();
-
-    public async Task<bool> TryRunCustomTaskAsync(string taskName, Func<Task> task)
+    public JwtAuthenticationStateProvider(ProtectedSessionStorage sessionStorage)
     {
-        var semaphore = GetOrCreateSemaphore(taskName);
-
-        if (!await semaphore.WaitAsync(0))
-        {
-            // Задача с таким именем уже выполняется
-            return false;
-        }
-
-        try
-        {
-            await task();
-            return true;
-        }
-        finally
-        {
-            semaphore.Release();
-        }
+        _sessionStorage = sessionStorage;
     }
 
-    public bool IsTaskRunning(string taskName)
+    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
-        var semaphore = GetOrCreateSemaphore(taskName);
-        return semaphore.CurrentCount == 0;
+        var tokenResult = await _sessionStorage.GetAsync<string>("accessToken");
+        var token = tokenResult.Success ? tokenResult.Value : null;
+
+        if (string.IsNullOrWhiteSpace(token) || IsTokenExpired(token))
+            return new AuthenticationState(_anonymous);
+
+        var identity = new ClaimsIdentity(ParseClaimsFromJwt(token), "jwt");
+        var user = new ClaimsPrincipal(identity);
+        return new AuthenticationState(user);
     }
 
-    private SemaphoreSlim GetOrCreateSemaphore(string taskName)
+    public async Task MarkUserAsAuthenticated(string token)
     {
-        lock (_lock)
-        {
-            if (!_taskLocks.TryGetValue(taskName, out var semaphore))
-            {
-                semaphore = new SemaphoreSlim(1, 1);
-                _taskLocks[taskName] = semaphore;
-            }
-
-            return semaphore;
-        }
-    }
-}
-
-
-
-<button @onclick="RunUpdateFiles">Обновить файлы</button>
-<button @onclick="RunScanDb">Сканировать БД</button>
-
-@code {
-    [Inject] CustomsService CustomsService { get; set; }
-
-    private async Task RunUpdateFiles()
-    {
-        bool success = await CustomsService.RunManualTaskAsync("UpdateFileList");
-
-        Console.WriteLine(success ? "Файлы обновляются" : "Уже выполняется");
+        await _sessionStorage.SetAsync("accessToken", token);
+        var identity = new ClaimsIdentity(ParseClaimsFromJwt(token), "jwt");
+        var user = new ClaimsPrincipal(identity);
+        NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(user)));
     }
 
-    private async Task RunScanDb()
+    public async Task MarkUserAsLoggedOut()
     {
-        bool success = await CustomsService.RunManualTaskAsync("ScanDatabase");
-
-        Console.WriteLine(success ? "БД сканируется" : "Уже выполняется");
-    }
-}
-
-
-
-public class CustomsService
-{
-    private readonly CustomsServiceController _controller;
-
-    public CustomsService(CustomsServiceController controller)
-    {
-        _controller = controller;
+        await _sessionStorage.DeleteAsync("accessToken");
+        NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(_anonymous)));
     }
 
-    public Task<bool> RunManualTaskAsync(string taskName)
+    private IEnumerable<Claim> ParseClaimsFromJwt(string jwt)
     {
-        return _controller.TryRunCustomTaskAsync(taskName, () => ExecuteTaskAsync(taskName));
+        var handler = new JwtSecurityTokenHandler();
+        var token = handler.ReadJwtToken(jwt);
+        return token.Claims;
     }
 
-    private Task ExecuteTaskAsync(string taskName)
+    private bool IsTokenExpired(string token)
     {
-        switch (taskName)
-        {
-            case "UpdateFileList":
-                return DoRefreshFileListAsync();
-            case "ScanDatabase":
-                return DoScanDatabaseAsync();
-            default:
-                throw new InvalidOperationException($"Unknown task: {taskName}");
-        }
-    }
-
-    private async Task DoRefreshFileListAsync()
-    {
-        await Task.Delay(5000); // имитация работы
-    }
-
-    private async Task DoScanDatabaseAsync()
-    {
-        await Task.Delay(7000); // имитация работы
+        var handler = new JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(token);
+        return jwt.ValidTo < DateTime.UtcNow;
     }
 }
