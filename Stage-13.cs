@@ -1,90 +1,66 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 
-[ApiController]
-[Route("auth")]
-public class AuthController : ControllerBase
+public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 {
-    private const string JwtKey = "super_secret_key_12345"; // ❗ Храни в секрете
-    private const string Issuer = "MyApp";
-    private const string Audience = "MyAppClient";
+    private readonly ProtectedSessionStorage _sessionStorage;
+    private ClaimsPrincipal _anonymous = new ClaimsPrincipal(new ClaimsIdentity());
+    private string? _cachedToken;
 
-    [HttpPost("login")]
-    public IActionResult Login([FromBody] LoginModel model)
+    public JwtAuthenticationStateProvider(ProtectedSessionStorage sessionStorage)
     {
-        // 🔐 Простейшая проверка (замени на БД)
-        if (model.Login == "admin" && model.Password == "123")
-        {
-            var accessToken = GenerateToken(model.Login, TimeSpan.FromMinutes(5));     // 🔓 короткоживущий токен
-            var refreshToken = GenerateToken(model.Login, TimeSpan.FromMinutes(60));   // 🔁 токен для обновления
-
-            return Ok(new
-            {
-                accessToken,
-                refreshToken
-            });
-        }
-
-        return Unauthorized();
+        _sessionStorage = sessionStorage;
     }
 
-    [HttpPost("refresh")]
-    public IActionResult Refresh([FromBody] RefreshRequest req)
+    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
-        var handler = new JwtSecurityTokenHandler();
-
         try
         {
-            var token = handler.ReadJwtToken(req.RefreshToken);
-            if (token.ValidTo < DateTime.UtcNow)
-                return Unauthorized();
+            if (_cachedToken == null)
+            {
+                var tokenResult = await _sessionStorage.GetAsync<string>("accessToken");
+                if (!tokenResult.Success || string.IsNullOrWhiteSpace(tokenResult.Value))
+                    return new AuthenticationState(_anonymous);
 
-            var username = token.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
-            if (string.IsNullOrWhiteSpace(username))
-                return Unauthorized();
+                _cachedToken = tokenResult.Value;
+            }
 
-            var newToken = GenerateToken(username, TimeSpan.FromMinutes(5));
-            return Ok(new { accessToken = newToken });
+            var identity = ParseClaimsFromJwt(_cachedToken);
+            var user = new ClaimsPrincipal(identity);
+            return new AuthenticationState(user);
         }
         catch
         {
-            return Unauthorized();
+            return new AuthenticationState(_anonymous);
         }
     }
 
-    private string GenerateToken(string login, TimeSpan expiresIn)
+    public async Task MarkUserAsAuthenticated(string token)
     {
-        var claims = new[]
-        {
-            new Claim(ClaimTypes.Name, login),
-            new Claim(ClaimTypes.NameIdentifier, "1"),
-            new Claim(ClaimTypes.Role, "Admin")
-        };
-
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtKey));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            issuer: Issuer,
-            audience: Audience,
-            claims: claims,
-            expires: DateTime.UtcNow.Add(expiresIn),
-            signingCredentials: creds);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        _cachedToken = token;
+        await _sessionStorage.SetAsync("accessToken", token);
+        var identity = ParseClaimsFromJwt(token);
+        var user = new ClaimsPrincipal(identity);
+        NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(user)));
     }
-}
 
-public class LoginModel
-{
-    public string Login { get; set; } = string.Empty;
-    public string Password { get; set; } = string.Empty;
-}
+    public async Task MarkUserAsLoggedOut()
+    {
+        _cachedToken = null;
+        await _sessionStorage.DeleteAsync("accessToken");
+        var user = _anonymous;
+        NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(user)));
+    }
 
-public class RefreshRequest
-{
-    public string RefreshToken { get; set; } = string.Empty;
+    private ClaimsIdentity ParseClaimsFromJwt(string jwt)
+    {
+        var handler = new JwtSecurityTokenHandler();
+        var token = handler.ReadJwtToken(jwt);
+
+        var claims = token.Claims.ToList();
+
+        return new ClaimsIdentity(claims, "jwt");
+    }
 }
