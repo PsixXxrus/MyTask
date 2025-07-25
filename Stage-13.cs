@@ -1,56 +1,90 @@
-using Microsoft.AspNetCore.Components.Authorization;
-using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Text;
 
-public class JwtAuthenticationStateProvider : AuthenticationStateProvider
+[ApiController]
+[Route("auth")]
+public class AuthController : ControllerBase
 {
-    private readonly ProtectedSessionStorage _sessionStorage;
-    private ClaimsPrincipal _anonymous => new(new ClaimsIdentity());
+    private const string JwtKey = "super_secret_key_12345"; // ❗ Храни в секрете
+    private const string Issuer = "MyApp";
+    private const string Audience = "MyAppClient";
 
-    public JwtAuthenticationStateProvider(ProtectedSessionStorage sessionStorage)
+    [HttpPost("login")]
+    public IActionResult Login([FromBody] LoginModel model)
     {
-        _sessionStorage = sessionStorage;
+        // 🔐 Простейшая проверка (замени на БД)
+        if (model.Login == "admin" && model.Password == "123")
+        {
+            var accessToken = GenerateToken(model.Login, TimeSpan.FromMinutes(5));     // 🔓 короткоживущий токен
+            var refreshToken = GenerateToken(model.Login, TimeSpan.FromMinutes(60));   // 🔁 токен для обновления
+
+            return Ok(new
+            {
+                accessToken,
+                refreshToken
+            });
+        }
+
+        return Unauthorized();
     }
 
-    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
-    {
-        var tokenResult = await _sessionStorage.GetAsync<string>("accessToken");
-        var token = tokenResult.Success ? tokenResult.Value : null;
-
-        if (string.IsNullOrWhiteSpace(token) || IsTokenExpired(token))
-            return new AuthenticationState(_anonymous);
-
-        var identity = new ClaimsIdentity(ParseClaimsFromJwt(token), "jwt");
-        var user = new ClaimsPrincipal(identity);
-        return new AuthenticationState(user);
-    }
-
-    public async Task MarkUserAsAuthenticated(string token)
-    {
-        await _sessionStorage.SetAsync("accessToken", token);
-        var identity = new ClaimsIdentity(ParseClaimsFromJwt(token), "jwt");
-        var user = new ClaimsPrincipal(identity);
-        NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(user)));
-    }
-
-    public async Task MarkUserAsLoggedOut()
-    {
-        await _sessionStorage.DeleteAsync("accessToken");
-        NotifyAuthenticationStateChanged(Task.FromResult(new AuthenticationState(_anonymous)));
-    }
-
-    private IEnumerable<Claim> ParseClaimsFromJwt(string jwt)
+    [HttpPost("refresh")]
+    public IActionResult Refresh([FromBody] RefreshRequest req)
     {
         var handler = new JwtSecurityTokenHandler();
-        var token = handler.ReadJwtToken(jwt);
-        return token.Claims;
+
+        try
+        {
+            var token = handler.ReadJwtToken(req.RefreshToken);
+            if (token.ValidTo < DateTime.UtcNow)
+                return Unauthorized();
+
+            var username = token.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            if (string.IsNullOrWhiteSpace(username))
+                return Unauthorized();
+
+            var newToken = GenerateToken(username, TimeSpan.FromMinutes(5));
+            return Ok(new { accessToken = newToken });
+        }
+        catch
+        {
+            return Unauthorized();
+        }
     }
 
-    private bool IsTokenExpired(string token)
+    private string GenerateToken(string login, TimeSpan expiresIn)
     {
-        var handler = new JwtSecurityTokenHandler();
-        var jwt = handler.ReadJwtToken(token);
-        return jwt.ValidTo < DateTime.UtcNow;
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.Name, login),
+            new Claim(ClaimTypes.NameIdentifier, "1"),
+            new Claim(ClaimTypes.Role, "Admin")
+        };
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(JwtKey));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: Issuer,
+            audience: Audience,
+            claims: claims,
+            expires: DateTime.UtcNow.Add(expiresIn),
+            signingCredentials: creds);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
     }
+}
+
+public class LoginModel
+{
+    public string Login { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+}
+
+public class RefreshRequest
+{
+    public string RefreshToken { get; set; } = string.Empty;
 }
