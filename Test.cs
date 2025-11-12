@@ -1,123 +1,60 @@
-кusing System;
-using System.Collections.Generic;
-using System.Windows.Forms;
-using OCTell.Plugins; // пространство имён Oktell SDK
+public class InputeParam
+		{
+			/// <summary>
+			/// Уникальное имя параметра. 
+			/// По которому необходимо будет производиться сопоставление, когда параметры в рабочем процессе будут переданы в форму.
+			/// </summary>
+			public string Key { get; set; } = "None";
+			/// <summary>
+			/// Тип параметра. Определяет способ получения значения параметра при настройке в сценарии и тип значения. 
+			/// </summary>
+			public Types Type { get; set; } = Types._string;
+			/// <summary>
+			/// Название параметра, которое увидит разработчик сценанрия.
+			/// </summary>
+			public string Name { get; set; } = "Visible name param";
+			/// <summary>
+			/// Описание параметра для разработчика сценария (подробная инструкция для получения ожидаемого значения).
+			/// </summary>
+			public string Description { get; set; } = "Description param";
+			/// <summary>
+			/// Значение параметра, которое будет без изменений передано на вход в режиме выполнения. Может не быть задано.
+			/// </summary>
+			public string Extra { get; set; } = null;
 
-namespace MyMinimalPlugin
-{
-    // Главный класс плагина — ОБЯЗАТЕЛЬНО должен реализовывать IOktellPluginForm
-    public class PluginMain : IOktellPluginForm
-    {
-        public string PluginID => "MyMinimalPlugin"; // уникальный идентификатор
-        public string PluginName => "Пример плагина Oktell";
+			/// <summary>Перечень возможных типов параметра</summary>
+			public sealed class Types
+			{
+				// Закрытые поля только для чтения для обеспечения неизменяемости
+				private readonly string _name;
+				private readonly int _value;
 
-        public PluginMain()
-        {
-            // Конструктор
-        }
+				/// <summary>Название типа</summary>
+				public string Name
+				{
+					get { return _name; }
+				}
 
-        // Возвращает входные параметры формы
-        public Dictionary<string, string> GetInputParams(Guid idPlugin, Guid idForm)
-        {
-            var input = new Dictionary<string, string>
-            {
-                { "phone", "Номер телефона" }
-            };
-            return input;
-        }
+				/// <summary>Тип в INT значении</summary>
+				public int Value
+				{
+					get { return _value; }
+				}
 
-        // Возвращает выходные параметры формы
-        public Dictionary<string, string> GetOutputParams(Guid idPlugin, Guid idForm)
-        {
-            var output = new Dictionary<string, string>
-            {
-                { "result", "Результат работы плагина" }
-            };
-            return output;
-        }
+				// Конструктор для инициализации значений
+				public Types(string name, int value)
+				{
+					_name = name;
+					_value = value;
+				}
 
-        // Основной метод запуска
-        public Dictionary<string, string> Run(Dictionary<string, string> inputParams, 
-                                              out bool success, 
-                                              out string message)
-        {
-            success = true;
-            message = "Плагин успешно выполнен";
-
-            var output = new Dictionary<string, string>
-            {
-                { "result", $"Обработан номер: {inputParams["phone"]}" }
-            };
-
-            return output;
-        }
-
-        // Метод возвращает WinForm-контрол (если форма требуется)
-        public Control GetControl(Guid idPlugin, Guid idForm)
-        {
-            return new Label
-            {
-                Text = "Минимальный плагин Oktell работает!",
-                Dock = DockStyle.Fill,
-                TextAlign = System.Drawing.ContentAlignment.MiddleCenter
-            };
-        }
-    }
-}
-
-
-using System;
-using System.Windows.Forms;
-
-namespace OktellPlugin
-{
-    /// <summary>
-    /// Минимальный родительский контрол плагина без зависимостей от Control01/02/03/04.
-    /// Достаточно для корректной работы Base.cs (OnQuery, Mode, GetById).
-    /// </summary>
-    public class ControlParent : UserControl
-    {
-        // То, что ожидает Base.cs
-        public event Base.PluginQueryInvoker OnQuery;
-
-        /// <summary>
-        /// Режим работы (Base.cs пишет сюда 0/1/2/3).
-        /// </summary>
-        public int Mode { get; set; }
-
-        public ControlParent()
-        {
-            Dock = DockStyle.Fill;
-
-            // Простейший UI, чтобы было видно, что плагин отрисовался
-            var lbl = new Label
-            {
-                Dock = DockStyle.Fill,
-                TextAlign = System.Drawing.ContentAlignment.MiddleCenter,
-                AutoSize = false,
-                Text = "Минимальный плагин Oktell: ControlParent без Control01/02/03/04"
-            };
-            Controls.Add(lbl);
-        }
-
-        /// <summary>
-        /// Base.cs вызывает cp.GetById(i, true) — делаем безопасный no-op.
-        /// </summary>
-        public void GetById(int id, bool open)
-        {
-            // Ничего не делаем — минимальная заглушка
-            // По желанию можно поднимать событие, логировать и т.п.
-        }
-
-        /// <summary>
-        /// Вспомогательный метод: если где-то понадобится дернуть запрос из UI.
-        /// </summary>
-        public void RaiseQuery(string xml)
-        {
-            // Если кто-то подписан (Base.cs подписывается), отдадим xml наверх
-            var handler = OnQuery;
-            if (handler != null)
-                handler(xml);
-        }
-    }
-}
+				// Статические предопределенные переменные для быстрого использования
+				public static readonly Types _string = new Types("string", 1);
+				public static readonly Types _int = new Types("int", 2);
+				public static readonly Types _datetime = new Types("datetime", 3);
+				public static readonly Types _argument = new Types("argument", 4);
+				public static readonly Types _table = new Types("table", 5);
+				public static readonly Types _tablequery = new Types("tablequery", 6);
+				public static readonly Types _fixedlist = new Types("fixedlist", 7);
+			}
+		}
