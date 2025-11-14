@@ -1,65 +1,23 @@
-using System;
-using System.IO;
-using System.Net;
-using System.Text;
-using System.Web.Script.Serialization;
+Есть инструкция по загрузки файлов на yandex.cloud
+https://yandex.cloud/ru/docs/storage/s3/s3-api-quickstart#curl-821_2
 
-public static class YandexTranslate
-{
-    public static string Translate(string text, string targetLang, string apiKey, string sourceLang = null)
-    {
-        const string url = "https://translate.api.cloud.yandex.net/translate/v2/translate";
+Для загрузки используется запрос curl
+curl \
+  --request PUT \
+  --upload-file "${LOCAL_FILE}" \
+  --verbose \
+  --header "Host: storage.yandexcloud.net" \
+  --header "Date: ${DATE_VALUE}" \
+  --header "Authorization: AWS ${AWS_KEY_ID}:${SIGNATURE}" \
+  "https://storage.yandexcloud.net/${BUCKET_NAME}/${OBJECT_PATH}"
+А в результате я должен получить
+< HTTP/2 200
+< server: nginx
+< date: Thu, 15 May 2025 07:23:08 GMT
+< content-type: text/plain
+< etag: "f75a361db63aa4722fb8e083********"
+< x-amz-request-id: 67ccce91********
+<
+* Connection #0 to host storage.yandexcloud.net left intact
 
-        var request = (HttpWebRequest)WebRequest.Create(url);
-        request.Method = "POST";
-        request.ContentType = "application/json";
-
-        // Передаём API-ключ
-        request.Headers.Add("Authorization", "Api-Key " + apiKey);
-
-        // Создаём JSON
-        var payload = new
-        {
-            sourceLanguageCode = sourceLang,   // если null → автодетект
-            targetLanguageCode = targetLang,   // например "en"
-            texts = new[] { text }             // массив строк
-        };
-
-        var json = new JavaScriptSerializer().Serialize(payload);
-        var bytes = Encoding.UTF8.GetBytes(json);
-
-        // Записываем тело
-        using (var reqStream = request.GetRequestStream())
-        {
-            reqStream.Write(bytes, 0, bytes.Length);
-        }
-
-        // Получаем ответ
-        using (var response = (HttpWebResponse)request.GetResponse())
-        using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
-        {
-            string resultJson = reader.ReadToEnd();
-
-            // Пример ответа:
-            // {
-            //   "translations": [ { "text": "Hello", "detectedLanguageCode": "ru" } ]
-            // }
-
-            var responseObj = new JavaScriptSerializer()
-                .Deserialize<TranslateResponse>(resultJson);
-
-            return responseObj.translations[0].text;
-        }
-    }
-
-    private class TranslateResponse
-    {
-        public Translation[] translations { get; set; }
-    }
-
-    private class Translation
-    {
-        public string text { get; set; }
-        public string detectedLanguageCode { get; set; }
-    }
-}
+Мне нужно, чтобы ты переписал это на HTTP в C#, но авторизацию я буду использовать не AWS а Api-Key
