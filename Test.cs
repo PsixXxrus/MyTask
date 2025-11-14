@@ -1,8 +1,45 @@
 using System;
+using System.IO;
+using System.Security.Cryptography;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.OpenSsl;
+using Org.BouncyCastle.Security;
+
+public static class RsaPemLoader
+{
+    public static RSA LoadPrivateKey(string pem)
+    {
+        using (var str = new StringReader(pem))
+        {
+            var reader = new PemReader(str);
+            object keyObject = reader.ReadObject();
+
+            AsymmetricKeyParameter privateKey;
+
+            // Ключ может быть как парой (public+private), так и просто private
+            if (keyObject is AsymmetricCipherKeyPair keyPair)
+                privateKey = keyPair.Private;
+            else
+                privateKey = (AsymmetricKeyParameter)keyObject;
+
+            var rsaParams = DotNetUtilities.ToRSAParameters(
+                (RsaPrivateCrtKeyParameters)privateKey);
+
+            var rsa = RSA.Create(); // в .NET Framework вернёт RSACryptoServiceProvider/RSACng
+            rsa.ImportParameters(rsaParams);
+            return rsa;
+        }
+    }
+}
+
+
+
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
+using Jose;
 
 class Program
 {
@@ -27,48 +64,10 @@ class Program
 
         string pem = File.ReadAllText("<файл_закрытого_ключа>");
 
-        using (RSA rsa = CreateRsaFromPem(pem))
+        using (RSA rsa = RsaPemLoader.LoadPrivateKey(pem))
         {
-            string encodedToken = Jose.JWT.Encode(payload, rsa, JwsAlgorithm.PS256, headers);
+            string encodedToken = JWT.Encode(payload, rsa, JwsAlgorithm.PS256, headers);
             Console.WriteLine(encodedToken);
         }
-    }
-
-    public static RSA CreateRsaFromPem(string pem)
-    {
-        pem = pem.Trim();
-
-        var rsa = RSA.Create();
-
-        if (pem.Contains("BEGIN PRIVATE KEY")) // PKCS#8
-        {
-            byte[] keyData = GetBytesFromPem(pem, "PRIVATE KEY");
-            rsa.ImportPkcs8PrivateKey(keyData, out _);
-        }
-        else if (pem.Contains("BEGIN RSA PRIVATE KEY")) // PKCS#1
-        {
-            byte[] keyData = GetBytesFromPem(pem, "RSA PRIVATE KEY");
-            rsa.ImportRSAPrivateKey(keyData, out _);
-        }
-        else
-        {
-            throw new Exception("Неизвестный формат PEM ключа");
-        }
-
-        return rsa;
-    }
-
-    private static byte[] GetBytesFromPem(string pem, string section)
-    {
-        string header = $"-----BEGIN {section}-----";
-        string footer = $"-----END {section}-----";
-
-        var lines = pem
-            .Replace(header, "")
-            .Replace(footer, "")
-            .Replace("\r", "")
-            .Replace("\n", "");
-
-        return Convert.FromBase64String(lines);
     }
 }
