@@ -1,23 +1,87 @@
-Есть инструкция по загрузки файлов на yandex.cloud
-https://yandex.cloud/ru/docs/storage/s3/s3-api-quickstart#curl-821_2
+using System;
+using System.IO;
+using System.Net;
+using System.Text;
 
-Для загрузки используется запрос curl
-curl \
-  --request PUT \
-  --upload-file "${LOCAL_FILE}" \
-  --verbose \
-  --header "Host: storage.yandexcloud.net" \
-  --header "Date: ${DATE_VALUE}" \
-  --header "Authorization: AWS ${AWS_KEY_ID}:${SIGNATURE}" \
-  "https://storage.yandexcloud.net/${BUCKET_NAME}/${OBJECT_PATH}"
-А в результате я должен получить
-< HTTP/2 200
-< server: nginx
-< date: Thu, 15 May 2025 07:23:08 GMT
-< content-type: text/plain
-< etag: "f75a361db63aa4722fb8e083********"
-< x-amz-request-id: 67ccce91********
-<
-* Connection #0 to host storage.yandexcloud.net left intact
+public static class YandexObjectStorage
+{
+    public static string UploadFile(
+        string apiKey,
+        string bucketName,
+        string objectPath,
+        string localFilePath)
+    {
+        string url = $"https://storage.yandexcloud.net/{bucketName}/{objectPath}";
+        var sb = new StringBuilder();
 
-Мне нужно, чтобы ты переписал это на HTTP в C#, но авторизацию я буду использовать не AWS а Api-Key
+        try
+        {
+            var request = (HttpWebRequest)WebRequest.Create(url);
+            request.Method = "PUT";
+            request.ContentType = "application/octet-stream";
+
+            // Авторизация через API-ключ
+            request.Headers.Add("Authorization", "Api-Key " + apiKey);
+
+            // Хост
+            request.Host = "storage.yandexcloud.net";
+
+            // Загружаем файл
+            byte[] fileBytes = File.ReadAllBytes(localFilePath);
+            request.ContentLength = fileBytes.Length;
+
+            using (Stream reqStream = request.GetRequestStream())
+                reqStream.Write(fileBytes, 0, fileBytes.Length);
+
+            using (var response = (HttpWebResponse)request.GetResponse())
+            using (var reader = new StreamReader(response.GetResponseStream()))
+            {
+                string body = reader.ReadToEnd();
+
+                sb.AppendLine("=== SUCCESS RESPONSE ===");
+                sb.AppendLine($"URL: {url}");
+                sb.AppendLine($"Status: {(int)response.StatusCode} {response.StatusCode}");
+                sb.AppendLine("Headers:");
+
+                foreach (string header in response.Headers.AllKeys)
+                    sb.AppendLine($"  {header}: {response.Headers[header]}");
+
+                sb.AppendLine("Body:");
+                sb.AppendLine(body);
+            }
+        }
+        catch (WebException ex)
+        {
+            sb.AppendLine("=== ERROR RESPONSE ===");
+            sb.AppendLine($"URL: {url}");
+
+            if (ex.Response is HttpWebResponse errorResponse)
+            {
+                sb.AppendLine($"Status: {(int)errorResponse.StatusCode} {errorResponse.StatusCode}");
+                sb.AppendLine("Headers:");
+
+                foreach (string header in errorResponse.Headers.AllKeys)
+                    sb.AppendLine($"  {header}: {errorResponse.Headers[header]}");
+
+                using (var reader = new StreamReader(errorResponse.GetResponseStream()))
+                {
+                    string body = reader.ReadToEnd();
+                    sb.AppendLine("Body:");
+                    sb.AppendLine(body);
+                }
+            }
+            else
+            {
+                sb.AppendLine("No HTTP response available.");
+                sb.AppendLine(ex.ToString());
+            }
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine("=== UNKNOWN ERROR ===");
+            sb.AppendLine(ex.ToString());
+        }
+
+        return sb.ToString();
+    }
+}
