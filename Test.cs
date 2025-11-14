@@ -1,85 +1,71 @@
 using System;
-using System.IO;
-using System.Net;
 using System.Text;
+using System.Threading.Tasks;
+using Amazon;
+using Amazon.S3;
+using Amazon.S3.Model;
+using Amazon.Runtime;
 
-public static class YandexObjectStorage
+public static class YandexS3Uploader
 {
     public static string UploadFile(
-        string apiKey,
+        string accessKeyId,
+        string secretAccessKey,
         string bucketName,
-        string objectPath,
+        string objectKey,
         string localFilePath)
     {
-        string url = $"https://storage.yandexcloud.net/{bucketName}/{objectPath}";
         var sb = new StringBuilder();
+        sb.AppendLine("=== Yandex S3 Upload ===");
+        sb.AppendLine($"Bucket: {bucketName}");
+        sb.AppendLine($"Key:    {objectKey}");
+        sb.AppendLine($"File:   {localFilePath}");
 
-        try
+        // Конфиг клиента для Yandex Object Storage
+        var config = new AmazonS3Config
         {
-            var request = (HttpWebRequest)WebRequest.Create(url);
-            request.Method = "PUT";
-            request.ContentType = "application/octet-stream";
+            // Рекомендованный endpoint для AWS SDK .NET
+            ServiceURL = "https://s3.yandexcloud.net",
+            ForcePathStyle = true // на всякий случай, чтобы не было проблем с виртуальными хостами
+        };
 
-            // Авторизация через API-ключ
-            request.Headers.Add("Authorization", "Api-Key " + apiKey);
+        // Credentials – это статический ключ сервиса Yandex (key_id + secret)
+        var creds = new BasicAWSCredentials(accessKeyId, secretAccessKey);
 
-            // Хост
-            request.Host = "storage.yandexcloud.net";
-
-            // Загружаем файл
-            byte[] fileBytes = File.ReadAllBytes(localFilePath);
-            request.ContentLength = fileBytes.Length;
-
-            using (Stream reqStream = request.GetRequestStream())
-                reqStream.Write(fileBytes, 0, fileBytes.Length);
-
-            using (var response = (HttpWebResponse)request.GetResponse())
-            using (var reader = new StreamReader(response.GetResponseStream()))
-            {
-                string body = reader.ReadToEnd();
-
-                sb.AppendLine("=== SUCCESS RESPONSE ===");
-                sb.AppendLine($"URL: {url}");
-                sb.AppendLine($"Status: {(int)response.StatusCode} {response.StatusCode}");
-                sb.AppendLine("Headers:");
-
-                foreach (string header in response.Headers.AllKeys)
-                    sb.AppendLine($"  {header}: {response.Headers[header]}");
-
-                sb.AppendLine("Body:");
-                sb.AppendLine(body);
-            }
-        }
-        catch (WebException ex)
+        using (var client = new AmazonS3Client(creds, config))
         {
-            sb.AppendLine("=== ERROR RESPONSE ===");
-            sb.AppendLine($"URL: {url}");
-
-            if (ex.Response is HttpWebResponse errorResponse)
+            try
             {
-                sb.AppendLine($"Status: {(int)errorResponse.StatusCode} {errorResponse.StatusCode}");
-                sb.AppendLine("Headers:");
-
-                foreach (string header in errorResponse.Headers.AllKeys)
-                    sb.AppendLine($"  {header}: {errorResponse.Headers[header]}");
-
-                using (var reader = new StreamReader(errorResponse.GetResponseStream()))
+                var request = new PutObjectRequest
                 {
-                    string body = reader.ReadToEnd();
-                    sb.AppendLine("Body:");
-                    sb.AppendLine(body);
-                }
+                    BucketName = bucketName,
+                    Key = objectKey,
+                    FilePath = localFilePath
+                };
+
+                // Синхронная обёртка вокруг async-метода
+                PutObjectResponse response = client.PutObjectAsync(request)
+                                                   .GetAwaiter()
+                                                   .GetResult();
+
+                sb.AppendLine("Status: SUCCESS");
+                sb.AppendLine($"HTTP Status Code: {(int)response.HttpStatusCode} {response.HttpStatusCode}");
+                sb.AppendLine($"ETag: {response.ETag}");
+                sb.AppendLine($"RequestId: {response.ResponseMetadata?.RequestId}");
             }
-            else
+            catch (AmazonS3Exception ex)
             {
-                sb.AppendLine("No HTTP response available.");
+                sb.AppendLine("Status: ERROR (AmazonS3Exception)");
+                sb.AppendLine($"HTTP Status Code: {(int)ex.StatusCode} {ex.StatusCode}");
+                sb.AppendLine($"ErrorCode: {ex.ErrorCode}");
+                sb.AppendLine($"Message: {ex.Message}");
+                sb.AppendLine($"RequestId: {ex.RequestId}");
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("Status: ERROR (General)");
                 sb.AppendLine(ex.ToString());
             }
-        }
-        catch (Exception ex)
-        {
-            sb.AppendLine("=== UNKNOWN ERROR ===");
-            sb.AppendLine(ex.ToString());
         }
 
         return sb.ToString();
