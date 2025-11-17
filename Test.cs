@@ -9,13 +9,20 @@ using System.Threading.Tasks;
 
 namespace Yandex.SpeechKit.SttV3
 {
-    // =============================
-    //        CLIENT (HttpWebRequest)
-    // =============================
+    // ====================================
+    //   Client for REST STT v3 (Async)
+    // ====================================
     public class YandexSttClient
     {
         private readonly string _apiKey;
         private readonly string _folderId;
+
+        private const string RecognizeUrl =
+            "https://stt.api.cloud.yandex.net/stt/v3/recognizeFileAsync";
+
+        private const string OperationUrl =
+            "https://operation.api.cloud.yandex.net/operations/";
+
 
         public YandexSttClient(string apiKey, string folderId)
         {
@@ -23,31 +30,30 @@ namespace Yandex.SpeechKit.SttV3
             _folderId = folderId;
         }
 
-        private async Task<string> SendRequestAsync(RecognizeFileRequest request)
+        // -----------------------------
+        //    INTERNAL REQUEST CALL
+        // -----------------------------
+        private async Task<string> SendRequestAsync(object requestObj)
         {
-            string json = JsonSerializer.Serialize(request, new JsonSerializerOptions
+            var json = JsonSerializer.Serialize(requestObj, new JsonSerializerOptions
             {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                WriteIndented = false
             });
 
-            var url = "https://stt.api.cloud.yandex.net/speech/v3/recognizers:recognizeFile";
+            var req = (HttpWebRequest)WebRequest.Create(RecognizeUrl);
+            req.Method = "POST";
+            req.ContentType = "application/json";
+            req.Headers.Add("Authorization", $"Api-Key {_apiKey}");
+            req.Headers.Add("x-folder-id", _folderId);
 
-            var http = (HttpWebRequest)WebRequest.Create(url);
-            http.Method = "POST";
-            http.ContentType = "application/json";
-            http.Headers.Add("Authorization", $"Api-Key {_apiKey}");
-            http.Headers.Add("x-folder-id", _folderId);
-
-            using (var stream = new StreamWriter(await http.GetRequestStreamAsync()))
-            {
+            using (var stream = new StreamWriter(await req.GetRequestStreamAsync()))
                 await stream.WriteAsync(json);
-            }
 
             try
             {
-                using var response = (HttpWebResponse)await http.GetResponseAsync();
-                using var reader = new StreamReader(response.GetResponseStream());
+                var res = (HttpWebResponse)await req.GetResponseAsync();
+                using var reader = new StreamReader(res.GetResponseStream());
                 return await reader.ReadToEndAsync();
             }
             catch (WebException ex)
@@ -58,9 +64,14 @@ namespace Yandex.SpeechKit.SttV3
             }
         }
 
-        // =============================
-        //       URI (ссылка)
-        // =============================
+
+        // ====================================
+        //     Public methods
+        // ====================================
+
+        /// <summary>
+        /// Распознать аудио по URI
+        /// </summary>
         public Task<string> RecognizeFromUriAsync(
             string uri,
             string model = "general",
@@ -85,9 +96,10 @@ namespace Yandex.SpeechKit.SttV3
             return SendRequestAsync(req);
         }
 
-        // =============================
-        //       BASE64 (контент)
-        // =============================
+
+        /// <summary>
+        /// Распознать Base64 контент
+        /// </summary>
         public Task<string> RecognizeFromBase64Async(
             string base64,
             string model = "general",
@@ -112,98 +124,126 @@ namespace Yandex.SpeechKit.SttV3
             return SendRequestAsync(req);
         }
 
-        // =============================
-        //       LOCAL FILE → BASE64
-        // =============================
+
+        /// <summary>
+        /// Распознать локальный файл
+        /// </summary>
         public Task<string> RecognizeFromFileAsync(
             string filePath,
             string model = "general",
             string containerType = "WAV")
         {
-            byte[] bytes = File.ReadAllBytes(filePath);
-            string base64 = Convert.ToBase64String(bytes);
+            var bytes = File.ReadAllBytes(filePath);
+            var base64 = Convert.ToBase64String(bytes);
 
             return RecognizeFromBase64Async(base64, model, containerType);
         }
+
+
+        /// <summary>
+        /// Получить результат операции
+        /// </summary>
+        public async Task<string> GetOperationResultAsync(string operationId)
+        {
+            var url = OperationUrl + operationId;
+
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.Method = "GET";
+            req.Headers.Add("Authorization", $"Api-Key {_apiKey}");
+
+            using var response = (HttpWebResponse)await req.GetResponseAsync();
+            using var reader = new StreamReader(response.GetResponseStream());
+            return await reader.ReadToEndAsync();
+        }
     }
 
-    // =============================
-    //          MODELS
-    // =============================
+
+    // ====================================
+    //     MODELS (snake_case!)
+    // ====================================
 
     public class RecognizeFileRequest
     {
         [JsonPropertyName("content")] public string Content { get; set; }
         [JsonPropertyName("uri")] public string Uri { get; set; }
 
-        [JsonPropertyName("recognitionModel")]
+        [JsonPropertyName("recognition_model")]
         public RecognitionModel RecognitionModel { get; set; }
 
-        [JsonPropertyName("recognitionClassifier")]
+        [JsonPropertyName("recognition_classifier")]
         public RecognitionClassifier RecognitionClassifier { get; set; }
 
-        [JsonPropertyName("speechAnalysis")]
+        [JsonPropertyName("speech_analysis")]
         public SpeechAnalysis SpeechAnalysis { get; set; }
 
-        [JsonPropertyName("speakerLabeling")]
+        [JsonPropertyName("speaker_labeling")]
         public SpeakerLabeling SpeakerLabeling { get; set; }
 
         [JsonPropertyName("summarization")]
         public Summarization Summarization { get; set; }
     }
 
+
     public class RecognitionModel
     {
         [JsonPropertyName("model")] public string Model { get; set; }
 
-        [JsonPropertyName("audioFormat")] public AudioFormat AudioFormat { get; set; }
+        [JsonPropertyName("audio_format")]
+        public AudioFormat AudioFormat { get; set; }
 
-        [JsonPropertyName("textNormalization")]
+        [JsonPropertyName("text_normalization")]
         public TextNormalization TextNormalization { get; set; }
 
-        [JsonPropertyName("languageRestriction")]
+        [JsonPropertyName("language_restriction")]
         public LanguageRestriction LanguageRestriction { get; set; }
 
-        [JsonPropertyName("audioProcessingType")]
+        [JsonPropertyName("audio_processing_type")]
         public string AudioProcessingType { get; set; }
     }
 
+
     public class AudioFormat
     {
-        [JsonPropertyName("rawAudio")] public RawAudio RawAudio { get; set; }
-        [JsonPropertyName("containerAudio")] public ContainerAudio ContainerAudio { get; set; }
+        [JsonPropertyName("raw_audio")] public RawAudio RawAudio { get; set; }
+        [JsonPropertyName("container_audio")] public ContainerAudio ContainerAudio { get; set; }
     }
+
 
     public class RawAudio
     {
-        [JsonPropertyName("audioEncoding")] public string AudioEncoding { get; set; }
-        [JsonPropertyName("sampleRateHertz")] public string SampleRateHertz { get; set; }
-        [JsonPropertyName("audioChannelCount")] public string AudioChannelCount { get; set; }
+        [JsonPropertyName("audio_encoding")] public string AudioEncoding { get; set; }
+        [JsonPropertyName("sample_rate_hertz")] public string SampleRateHertz { get; set; }
+        [JsonPropertyName("audio_channel_count")] public string AudioChannelCount { get; set; }
     }
+
 
     public class ContainerAudio
     {
-        [JsonPropertyName("containerAudioType")] public string ContainerAudioType { get; set; }
+        [JsonPropertyName("container_audio_type")] public string ContainerAudioType { get; set; }
     }
+
 
     public class TextNormalization
     {
-        [JsonPropertyName("textNormalization")] public string Mode { get; set; }
-        [JsonPropertyName("profanityFilter")] public bool? ProfanityFilter { get; set; }
-        [JsonPropertyName("literatureText")] public bool? LiteratureText { get; set; }
-        [JsonPropertyName("phoneFormattingMode")] public string PhoneFormattingMode { get; set; }
+        [JsonPropertyName("text_normalization")] public string Mode { get; set; }
+        [JsonPropertyName("profanity_filter")] public bool? ProfanityFilter { get; set; }
+        [JsonPropertyName("literature_text")] public bool? LiteratureText { get; set; }
+        [JsonPropertyName("phone_formatting_mode")] public string PhoneFormattingMode { get; set; }
     }
+
 
     public class LanguageRestriction
     {
-        [JsonPropertyName("restrictionType")] public string RestrictionType { get; set; }
-        [JsonPropertyName("languageCode")] public List<string> LanguageCode { get; set; }
+        [JsonPropertyName("restriction_type")] public string RestrictionType { get; set; }
+        [JsonPropertyName("language_code")] public List<string> LanguageCode { get; set; }
     }
+
 
     public class RecognitionClassifier
     {
         [JsonPropertyName("classifiers")] public List<ClassifierItem> Classifiers { get; set; }
     }
+
 
     public class ClassifierItem
     {
@@ -211,32 +251,37 @@ namespace Yandex.SpeechKit.SttV3
         [JsonPropertyName("triggers")] public List<string> Triggers { get; set; }
     }
 
+
     public class SpeechAnalysis
     {
-        [JsonPropertyName("enableSpeakerAnalysis")] public bool? EnableSpeakerAnalysis { get; set; }
-        [JsonPropertyName("enableConversationAnalysis")] public bool? EnableConversationAnalysis { get; set; }
+        [JsonPropertyName("enable_speaker_analysis")] public bool? EnableSpeakerAnalysis { get; set; }
+        [JsonPropertyName("enable_conversation_analysis")] public bool? EnableConversationAnalysis { get; set; }
 
-        [JsonPropertyName("descriptiveStatisticsQuantiles")]
+        [JsonPropertyName("descriptive_statistics_quantiles")]
         public List<string> DescriptiveStatisticsQuantiles { get; set; }
     }
 
+
     public class SpeakerLabeling
     {
-        [JsonPropertyName("speakerLabeling")] public string Mode { get; set; }
+        [JsonPropertyName("speaker_labeling")] public string Mode { get; set; }
     }
+
 
     public class Summarization
     {
-        [JsonPropertyName("modelUri")] public string ModelUri { get; set; }
+        [JsonPropertyName("model_uri")] public string ModelUri { get; set; }
         [JsonPropertyName("properties")] public List<SummarizationProperty> Properties { get; set; }
     }
+
 
     public class SummarizationProperty
     {
         [JsonPropertyName("instruction")] public string Instruction { get; set; }
-        [JsonPropertyName("jsonObject")] public bool? JsonObject { get; set; }
-        [JsonPropertyName("jsonSchema")] public JsonSchemaWrapper JsonSchema { get; set; }
+        [JsonPropertyName("json_object")] public bool? JsonObject { get; set; }
+        [JsonPropertyName("json_schema")] public JsonSchemaWrapper JsonSchema { get; set; }
     }
+
 
     public class JsonSchemaWrapper
     {
