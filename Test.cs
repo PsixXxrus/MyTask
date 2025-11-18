@@ -1,14 +1,13 @@
-public (string json, string text) GetRecognitionSync(string operationId)
+public (string json, bool result) GetOperationStatusSync(string operationId)
 {
     if (string.IsNullOrEmpty(operationId))
         throw new ArgumentException("operationId не может быть пустым", nameof(operationId));
 
-    string url = $"https://stt.api.cloud.yandex.net/stt/v3/getRecognition?operation_id={WebUtility.UrlEncode(operationId)}";
+    string url = OperationUrl + operationId;
 
     var req = (HttpWebRequest)WebRequest.Create(url);
     req.Method = "GET";
     req.Headers.Add("Authorization", $"Api-Key {_apiKey}");
-    req.Headers.Add("x-folder-id", _folderId);
 
     string json;
 
@@ -22,43 +21,28 @@ public (string json, string text) GetRecognitionSync(string operationId)
     {
         using var reader = new StreamReader(ex.Response.GetResponseStream());
         string err = reader.ReadToEnd();
-        throw new Exception("Yandex STT getRecognition error: " + err);
+        throw new Exception("Yandex Operation API error: " + err);
     }
 
-    // Парсим текст
-    string text = null;
+    // Парсинг поля "done"
+    bool done = false;
 
     try
     {
-        var result = JsonSerializer.Deserialize<RecognitionResponse>(json);
-        text = result?.Result?.Alternatives?[0]?.Text;
+        var data = JsonSerializer.Deserialize<OperationStatusResponse>(json);
+        done = data?.Done ?? false;
     }
     catch
     {
-        // Если JSON не соответствует ожиданию — text останется null
+        // Если не удалось разобрать JSON — result остаётся false
     }
 
-    return (json, text);
+    return (json, done);
 }
 
 
-public class RecognitionResponse
+public class OperationStatusResponse
 {
-    [JsonPropertyName("result")]
-    public RecognitionResult Result { get; set; }
-}
-
-public class RecognitionResult
-{
-    [JsonPropertyName("alternatives")]
-    public List<RecognitionAlternative> Alternatives { get; set; }
-}
-
-public class RecognitionAlternative
-{
-    [JsonPropertyName("text")]
-    public string Text { get; set; }
-
-    [JsonPropertyName("confidence")]
-    public double? Confidence { get; set; }
+    [JsonPropertyName("done")]
+    public bool Done { get; set; }
 }
