@@ -1,3 +1,70 @@
-{"result":{"sessionUuid":{"uuid":"ac12c157-d996e023-dcf284a-93f8e88a","userRequestId":"undefined"},"audioCursors":{"receivedDataMs":"1200","resetTimeMs":"0","partialTimeMs":"1200","finalTimeMs":"1200","finalIndex":"0","eouTimeMs":"0"},"responseWallTimeMs":"108","final":{"alternatives":[{"words":[{"text":"привет","startTimeMs":"140","endTimeMs":"539"},{"text":"мир","startTimeMs":"620","endTimeMs":"1020"}],"text":"привет мир","startTimeMs":"0","endTimeMs":"1200","confidence":0,"languages":[]}],"channelTag":"0"},"channelTag":"0"}}
-{"result":{"sessionUuid":{"uuid":"ac12c157-d996e023-dcf284a-93f8e88a","userRequestId":"undefined"},"audioCursors":{"receivedDataMs":"1200","resetTimeMs":"0","partialTimeMs":"1200","finalTimeMs":"1200","finalIndex":"0","eouTimeMs":"0"},"responseWallTimeMs":"108","finalRefinement":{"finalIndex":"0","normalizedText":{"alternatives":[{"words":[{"text":"привет","startTimeMs":"140","endTimeMs":"539"},{"text":"мир","startTimeMs":"620","endTimeMs":"1020"}],"text":"Привет мир","startTimeMs":"0","endTimeMs":"1200","confidence":0,"languages":[]}],"channelTag":"0"}},"channelTag":"0"}}
-{"result":{"sessionUuid":{"uuid":"ac12c157-d996e023-dcf284a-93f8e88a","userRequestId":"undefined"},"audioCursors":{"receivedDataMs":"1200","resetTimeMs":"0","partialTimeMs":"1200","finalTimeMs":"1200","finalIndex":"0","eouTimeMs":"1200"},"responseWallTimeMs":"108","eouUpdate":{"timeMs":"1200"},"channelTag":"0"}}
+public class RecognitionResponse
+{
+    [JsonPropertyName("result")]
+    public RecognitionResult Result { get; set; }
+}
+
+public class RecognitionResult
+{
+    [JsonPropertyName("final")]
+    public RecognitionFinal Final { get; set; }
+
+    [JsonPropertyName("finalRefinement")]
+    public FinalRefinement FinalRefinement { get; set; }
+}
+
+public class RecognitionFinal
+{
+    [JsonPropertyName("alternatives")]
+    public List<RecognitionAlternative> Alternatives { get; set; }
+}
+
+public class FinalRefinement
+{
+    [JsonPropertyName("normalizedText")]
+    public NormalizedText NormalizedText { get; set; }
+}
+
+public class NormalizedText
+{
+    [JsonPropertyName("alternatives")]
+    public List<RecognitionAlternative> Alternatives { get; set; }
+}
+
+public class RecognitionAlternative
+{
+    [JsonPropertyName("text")]
+    public string Text { get; set; }
+}
+
+
+public (string json, string text) GetRecognitionSync(string operationId)
+{
+    string json = GetRecognitionSyncJson(operationId);
+
+    string text = null;
+
+    try
+    {
+        var r = JsonSerializer.Deserialize<RecognitionResponse>(json);
+
+        // 1️⃣ обычный финальный текст
+        text = r?.Result?.Final?.Alternatives?[0]?.Text;
+
+        if (!string.IsNullOrEmpty(text))
+            return (json, text);
+
+        // 2️⃣ нормализованный текст
+        text = r?.Result?.FinalRefinement?.NormalizedText?.Alternatives?[0]?.Text;
+
+        if (!string.IsNullOrEmpty(text))
+            return (json, text);
+
+        // 3️⃣ если текст отсутсвует (eouUpdate и пр.)
+        return (json, null);
+    }
+    catch
+    {
+        return (json, null);
+    }
+}
