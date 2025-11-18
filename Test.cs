@@ -1,48 +1,80 @@
-public (string json, bool result) GetOperationStatusSync(string operationId)
+public (string json, string operationId) RecognizeFromUri(
+    string uri,
+    string model = "general",
+    string containerType = "WAV")
 {
-    if (string.IsNullOrEmpty(operationId))
-        throw new ArgumentException("operationId не может быть пустым", nameof(operationId));
+    var req = new RecognizeFileRequest
+    {
+        Uri = uri,
+        RecognitionModel = new RecognitionModel
+        {
+            Model = model,
+            AudioFormat = new AudioFormat
+            {
+                ContainerAudio = new ContainerAudio
+                {
+                    ContainerAudioType = containerType
+                }
+            }
+        }
+    };
 
-    string url = OperationUrl + operationId;
+    string json = SendRequestSync(req);
 
-    var req = (HttpWebRequest)WebRequest.Create(url);
-    req.Method = "GET";
+    string opId = null;
+
+    try
+    {
+        var parsed = JsonSerializer.Deserialize<RecognitionInitResponse>(json);
+        opId = parsed?.Id; // будет null, если ошибка
+    }
+    catch
+    {
+        opId = null;
+    }
+
+    return (json, opId);
+}
+
+
+
+
+public class RecognitionInitResponse
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; }
+
+    [JsonPropertyName("done")]
+    public bool? Done { get; set; }
+}
+
+
+
+private string SendRequestSync(object requestObj)
+{
+    string json = JsonSerializer.Serialize(requestObj, new JsonSerializerOptions
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    });
+
+    var req = (HttpWebRequest)WebRequest.Create(RecognizeUrl);
+    req.Method = "POST";
+    req.ContentType = "application/json";
     req.Headers.Add("Authorization", $"Api-Key {_apiKey}");
+    req.Headers.Add("x-folder-id", _folderId);
 
-    string json;
+    using (var writer = new StreamWriter(req.GetRequestStream()))
+        writer.Write(json);
 
     try
     {
         using var resp = (HttpWebResponse)req.GetResponse();
         using var reader = new StreamReader(resp.GetResponseStream());
-        json = reader.ReadToEnd();
+        return reader.ReadToEnd();
     }
     catch (WebException ex)
     {
         using var reader = new StreamReader(ex.Response.GetResponseStream());
-        string err = reader.ReadToEnd();
-        throw new Exception("Yandex Operation API error: " + err);
+        return reader.ReadToEnd(); // Возвращаем ошибочный JSON тоже
     }
-
-    // Парсинг поля "done"
-    bool done = false;
-
-    try
-    {
-        var data = JsonSerializer.Deserialize<OperationStatusResponse>(json);
-        done = data?.Done ?? false;
-    }
-    catch
-    {
-        // Если не удалось разобрать JSON — result остаётся false
-    }
-
-    return (json, done);
-}
-
-
-public class OperationStatusResponse
-{
-    [JsonPropertyName("done")]
-    public bool Done { get; set; }
 }
