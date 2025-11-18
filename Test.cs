@@ -1,3 +1,65 @@
+private List<string> SplitJsonObjects(string json)
+{
+    var list = new List<string>();
+    int depth = 0;
+    int start = -1;
+
+    for (int i = 0; i < json.Length; i++)
+    {
+        if (json[i] == '{')
+        {
+            if (depth == 0)
+                start = i;
+            depth++;
+        }
+        else if (json[i] == '}')
+        {
+            depth--;
+            if (depth == 0 && start != -1)
+            {
+                list.Add(json.Substring(start, i - start + 1));
+                start = -1;
+            }
+        }
+    }
+
+    return list;
+}
+
+
+public (string json, string text) GetRecognitionSync(string operationId)
+{
+    string json = GetRecognitionSyncJson(operationId);
+    string finalText = null;
+
+    var objects = SplitJsonObjects(json);
+
+    foreach (var obj in objects)
+    {
+        try
+        {
+            var r = JsonSerializer.Deserialize<RecognitionResponse>(obj);
+
+            // финальный текст
+            var t1 = r?.Final?.Alternatives?[0]?.Text;
+            if (!string.IsNullOrEmpty(t1))
+                finalText = t1;
+
+            // нормализованный финальный текст
+            var t2 = r?.FinalRefinement?.NormalizedText?.Alternatives?[0]?.Text;
+            if (!string.IsNullOrEmpty(t2))
+                finalText = t2;
+        }
+        catch
+        {
+            // пропускаем некорректный json
+        }
+    }
+
+    return (json, finalText);
+}
+
+
 public class RecognitionResponse
 {
     [JsonPropertyName("final")]
@@ -31,31 +93,3 @@ public class RecognitionAlternative
     public string Text { get; set; }
 }
 
-public (string json, string text) GetRecognitionSync(string operationId)
-{
-    string json = GetRecognitionSyncJson(operationId);
-
-    string text = null;
-
-    try
-    {
-        var r = JsonSerializer.Deserialize<RecognitionResponse>(json);
-
-        // попытка 1: final
-        text = r?.Final?.Alternatives?[0]?.Text;
-        if (!string.IsNullOrEmpty(text))
-            return (json, text);
-
-        // попытка 2: finalRefinement.normalizedText
-        text = r?.FinalRefinement?.NormalizedText?.Alternatives?[0]?.Text;
-        if (!string.IsNullOrEmpty(text))
-            return (json, text);
-
-        // если ни одного — остаётся null
-        return (json, null);
-    }
-    catch
-    {
-        return (json, null);
-    }
-}
