@@ -12,8 +12,9 @@ namespace Yandex.SpeechKit.TtsV3
         private readonly string _apiKey;
         private readonly string _folderId;
 
+        // ❗ Правильный URL из документации
         private const string SynthesisUrl =
-            "https://tts.api.cloud.yandex.net/speech/v3/utteranceSynthesis";
+            "https://tts.api.cloud.yandex.net/tts/v3/utteranceSynthesis";
 
         public YandexTtsClient(string apiKey, string folderId)
         {
@@ -22,7 +23,8 @@ namespace Yandex.SpeechKit.TtsV3
         }
 
         /// <summary>
-        /// Синтез речи (sync)
+        /// Синтез речи (синхронно)
+        /// Возвращает (audioBytes, jsonMetadata)
         /// </summary>
         public (byte[] audioBytes, string jsonResponse) Synthesize(
             string text,
@@ -55,9 +57,9 @@ namespace Yandex.SpeechKit.TtsV3
             req.Method = "POST";
             req.ContentType = "application/json";
             req.Headers.Add("Authorization", $"Api-Key {_apiKey}");
-            req.Headers.Add("x-folder-id", _folderId");
+            req.Headers.Add("x-folder-id", _folderId);
 
-            // Write JSON body
+            // передаём тело JSON
             using (var writer = new StreamWriter(req.GetRequestStream()))
                 writer.Write(json);
 
@@ -72,13 +74,13 @@ namespace Yandex.SpeechKit.TtsV3
                 resp.GetResponseStream().CopyTo(ms);
                 audioBytes = ms.ToArray();
 
-                // Yandex возвращает метаданные в JSON заголовке
+                // В заголовке x-audio-metadata лежат JSON-метаданные
                 metaJson = resp.Headers["x-audio-metadata"];
             }
             catch (WebException ex)
             {
                 using var reader = new StreamReader(ex.Response.GetResponseStream());
-                metaJson = reader.ReadToEnd();
+                metaJson = reader.ReadToEnd(); // вернём ошибку
                 audioBytes = null;
             }
 
@@ -86,7 +88,7 @@ namespace Yandex.SpeechKit.TtsV3
         }
 
         /// <summary>
-        /// Запись синтезированного аудио в файл
+        /// Синтез речи прямо в файл
         /// </summary>
         public string SynthesizeToFile(
             string text,
@@ -99,37 +101,31 @@ namespace Yandex.SpeechKit.TtsV3
             var (audio, meta) = Synthesize(text, voice, language, audioFormat, isSsml);
 
             if (audio != null)
-            {
                 File.WriteAllBytes(outputPath, audio);
-            }
 
             return meta;
         }
     }
 
-    // =============================
-    //           MODELS
-    // =============================
+    // ------------------------------
+    // Models
+    // ------------------------------
 
     public class SynthesisRequest
     {
-        [JsonPropertyName("text")]
-        public string Text { get; set; }
-
-        [JsonPropertyName("ssml")]
-        public string Ssml { get; set; }
+        [JsonPropertyName("text")] public string Text { get; set; }
+        [JsonPropertyName("ssml")] public string Ssml { get; set; }
 
         [JsonPropertyName("output_audio_spec")]
         public OutputAudioSpec OutputAudioSpec { get; set; }
 
-        [JsonPropertyName("voice")]
-        public string Voice { get; set; }
-
-        [JsonPropertyName("model")]
-        public string Model { get; set; }
+        [JsonPropertyName("voice")] public string Voice { get; set; }
 
         [JsonPropertyName("language_code")]
         public string LanguageCode { get; set; }
+
+        [JsonPropertyName("model")]
+        public string Model { get; set; }
     }
 
     public class OutputAudioSpec
