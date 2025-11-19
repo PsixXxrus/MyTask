@@ -1,72 +1,146 @@
-public class RecognitionEnvelope
+using System;
+using System.IO;
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace Yandex.SpeechKit.TtsV3
 {
-    [JsonPropertyName("result")]
-    public RecognitionResult Result { get; set; }
-}
-
-public class RecognitionResult
-{
-    [JsonPropertyName("final")]
-    public RecognitionFinal Final { get; set; }
-
-    [JsonPropertyName("finalRefinement")]
-    public FinalRefinement FinalRefinement { get; set; }
-}
-
-public class RecognitionFinal
-{
-    [JsonPropertyName("alternatives")]
-    public List<RecognitionAlternative> Alternatives { get; set; }
-}
-
-public class FinalRefinement
-{
-    [JsonPropertyName("normalizedText")]
-    public NormalizedText NormalizedText { get; set; }
-}
-
-public class NormalizedText
-{
-    [JsonPropertyName("alternatives")]
-    public List<RecognitionAlternative> Alternatives { get; set; }
-}
-
-public class RecognitionAlternative
-{
-    [JsonPropertyName("text")]
-    public string Text { get; set; }
-}
-
-public (string json, string text) GetRecognitionSync(string operationId)
-{
-    string json = GetRecognitionSyncJson(operationId);
-    string finalText = null;
-
-    // Разделяем склеенные JSON-объекты
-    var jsonParts = SplitJsonObjects(json);
-
-    foreach (var part in jsonParts)
+    public class YandexTtsClient
     {
-        try
+        private readonly string _apiKey;
+        private readonly string _folderId;
+
+        private const string SynthesisUrl =
+            "https://tts.api.cloud.yandex.net/speech/v3/utteranceSynthesis";
+
+        public YandexTtsClient(string apiKey, string folderId)
         {
-            var r = JsonSerializer.Deserialize<RecognitionEnvelope>(part);
-            var result = r?.Result;
-
-            // 1) final
-            var t1 = result?.Final?.Alternatives?[0]?.Text;
-            if (!string.IsNullOrEmpty(t1))
-                finalText = t1;
-
-            // 2) finalRefinement
-            var t2 = result?.FinalRefinement?.NormalizedText?.Alternatives?[0]?.Text;
-            if (!string.IsNullOrEmpty(t2))
-                finalText = t2;
+            _apiKey = apiKey;
+            _folderId = folderId;
         }
-        catch
+
+        /// <summary>
+        /// Синтез речи (sync)
+        /// </summary>
+        public (byte[] audioBytes, string jsonResponse) Synthesize(
+            string text,
+            string voice = "oksana",
+            string language = "ru-RU",
+            string audioFormat = "oggopus",
+            bool isSsml = false)
         {
-            // игнорируем битые json-объекты
+            var requestBody = new SynthesisRequest
+            {
+                Text = isSsml ? null : text,
+                Ssml = isSsml ? text : null,
+                OutputAudioSpec = new OutputAudioSpec
+                {
+                    ContainerAudio = new ContainerAudio
+                    {
+                        ContainerAudioType = audioFormat
+                    }
+                },
+                Voice = voice,
+                LanguageCode = language
+            };
+
+            string json = JsonSerializer.Serialize(requestBody, new JsonSerializerOptions
+            {
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            });
+
+            var req = (HttpWebRequest)WebRequest.Create(SynthesisUrl);
+            req.Method = "POST";
+            req.ContentType = "application/json";
+            req.Headers.Add("Authorization", $"Api-Key {_apiKey}");
+            req.Headers.Add("x-folder-id", _folderId");
+
+            // Write JSON body
+            using (var writer = new StreamWriter(req.GetRequestStream()))
+                writer.Write(json);
+
+            byte[] audioBytes = null;
+            string metaJson = null;
+
+            try
+            {
+                using var resp = (HttpWebResponse)req.GetResponse();
+                using var ms = new MemoryStream();
+
+                resp.GetResponseStream().CopyTo(ms);
+                audioBytes = ms.ToArray();
+
+                // Yandex возвращает метаданные в JSON заголовке
+                metaJson = resp.Headers["x-audio-metadata"];
+            }
+            catch (WebException ex)
+            {
+                using var reader = new StreamReader(ex.Response.GetResponseStream());
+                metaJson = reader.ReadToEnd();
+                audioBytes = null;
+            }
+
+            return (audioBytes, metaJson);
+        }
+
+        /// <summary>
+        /// Запись синтезированного аудио в файл
+        /// </summary>
+        public string SynthesizeToFile(
+            string text,
+            string outputPath,
+            string voice = "oksana",
+            string language = "ru-RU",
+            string audioFormat = "oggopus",
+            bool isSsml = false)
+        {
+            var (audio, meta) = Synthesize(text, voice, language, audioFormat, isSsml);
+
+            if (audio != null)
+            {
+                File.WriteAllBytes(outputPath, audio);
+            }
+
+            return meta;
         }
     }
 
-    return (json, finalText);
+    // =============================
+    //           MODELS
+    // =============================
+
+    public class SynthesisRequest
+    {
+        [JsonPropertyName("text")]
+        public string Text { get; set; }
+
+        [JsonPropertyName("ssml")]
+        public string Ssml { get; set; }
+
+        [JsonPropertyName("output_audio_spec")]
+        public OutputAudioSpec OutputAudioSpec { get; set; }
+
+        [JsonPropertyName("voice")]
+        public string Voice { get; set; }
+
+        [JsonPropertyName("model")]
+        public string Model { get; set; }
+
+        [JsonPropertyName("language_code")]
+        public string LanguageCode { get; set; }
+    }
+
+    public class OutputAudioSpec
+    {
+        [JsonPropertyName("containerAudio")]
+        public ContainerAudio ContainerAudio { get; set; }
+    }
+
+    public class ContainerAudio
+    {
+        [JsonPropertyName("containerAudioType")]
+        public string ContainerAudioType { get; set; }
+    }
 }
