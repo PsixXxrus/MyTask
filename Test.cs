@@ -5,17 +5,19 @@ using System.Text.RegularExpressions;
 
 public enum ClientBranch
 {
-    Purchase,
-    Complaint,
-    Question,
+    BankCards,
+    BusinessServices,
+    SecuritiesMarket,
+    ProductsInfo,
+    Operator,
     Unknown
 }
 
 public class WeightedKeyword
 {
-    public string Canonical { get; set; }          // Основная форма слова
-    public int Weight { get; set; }               // Вес ключа
-    public List<string> Synonyms { get; set; }    // Синонимы
+    public string Canonical { get; set; }
+    public int Weight { get; set; }
+    public List<string> Synonyms { get; set; }
 }
 
 public static class ClientRouter
@@ -24,26 +26,48 @@ public static class ClientRouter
         new()
         {
             {
-                ClientBranch.Purchase, new List<WeightedKeyword>
+                ClientBranch.BankCards,
+                new List<WeightedKeyword>
                 {
-                    new() { Canonical = "купить", Weight = 5, Synonyms = new() { "покупка", "куплю", "приобрести", "заказать", "оплатить" } },
-                    new() { Canonical = "цена", Weight = 3, Synonyms = new() { "стоимость", "скидка" } }
+                    new() { Canonical = "карта", Weight = 5, Synonyms = new(){ "дебетовая", "кредитка", "кредитная", "дебетка", "карточка", "visa", "mastercard", "мир" } },
+                    new() { Canonical = "платёж", Weight = 3, Synonyms = new(){ "оплата", "транзакция", "списание" } },
+                    new() { Canonical = "лимит", Weight = 3, Synonyms = new(){ "ограничение", "лимиты" } }
                 }
             },
             {
-                ClientBranch.Complaint, new List<WeightedKeyword>
+                ClientBranch.BusinessServices,
+                new List<WeightedKeyword>
                 {
-                    new() { Canonical = "проблема", Weight = 5, Synonyms = new() { "ошибка", "не работает", "сломалось", "не могу", "не получается" } },
-                    new() { Canonical = "жалоба", Weight = 4, Synonyms = new() { "недовольство", "претензия" } }
+                    new() { Canonical = "юридический", Weight = 5, Synonyms = new(){ "юрлицо", "юр лица", "компания", "организация", "ип", "ооо" } },
+                    new() { Canonical = "рсчёт", Weight = 5, Synonyms = new(){ "расчетный", "рс", "расчетный счет", "расчётный счёт" } },
+                    new() { Canonical = "эквайринг", Weight = 4, Synonyms = new(){ "терминал", "торговый эквайринг" } },
+                    new() { Canonical = "зппроект", Weight = 3, Synonyms = new(){ "зарплатный проект" } }
                 }
             },
             {
-                ClientBranch.Question, new List<WeightedKeyword>
+                ClientBranch.SecuritiesMarket,
+                new List<WeightedKeyword>
                 {
-                    new() { Canonical = "как", Weight = 3, Synonyms = new() { "каким образом" } },
-                    new() { Canonical = "что", Weight = 2, Synonyms = new() { "какой", "какая", "какие" } },
-                    new() { Canonical = "почему", Weight = 3, Synonyms = new() { "зачем", "по какой причине" } },
-                    new() { Canonical = "подскажите", Weight = 4, Synonyms = new() { "интересует", "объясните", "хочу узнать" } }
+                    new() { Canonical = "акция", Weight = 5, Synonyms = new(){ "облигация", "ценная бумага", "ценные бумаги", "фондовый", "биржа" } },
+                    new() { Canonical = "инвест", Weight = 4, Synonyms = new(){ "инвестиция", "инвестиции", "инвестирование", "портфель" } },
+                    new() { Canonical = "брокер", Weight = 4, Synonyms = new(){ "брокерский", "брокерский счёт" } }
+                }
+            },
+            {
+                ClientBranch.ProductsInfo,
+                new List<WeightedKeyword>
+                {
+                    new() { Canonical = "продукт", Weight = 3, Synonyms = new(){ "услуга", "программа", "предложение" } },
+                    new() { Canonical = "кредит", Weight = 4, Synonyms = new(){ "ипотека", "займ", "потреб", "потребительский", "ставка" } },
+                    new() { Canonical = "вклад", Weight = 4, Synonyms = new(){ "депозит", "накопительный", "процент", "сберегательный" } }
+                }
+            },
+            {
+                ClientBranch.Operator,
+                new List<WeightedKeyword>
+                {
+                    new() { Canonical = "оператор", Weight = 10, Synonyms = new(){ "живой человек", "сотрудник", "переведи", "переведите", "хочу оператора", "менеджер" } },
+                    new() { Canonical = "человек", Weight = 8, Synonyms = new(){ "специалист", "консультант" } }
                 }
             }
         };
@@ -56,34 +80,34 @@ public static class ClientRouter
             return ClientBranch.Unknown;
 
         string text = message.ToLower();
-
-        // Разбиваем на слова
         var words = WordRegex.Matches(text)
                              .Select(m => NormalizeWord(m.Value))
                              .Where(w => !string.IsNullOrWhiteSpace(w))
                              .ToList();
 
-        var scores = new Dictionary<ClientBranch, int>
-        {
-            { ClientBranch.Purchase, 0 },
-            { ClientBranch.Complaint, 0 },
-            { ClientBranch.Question, 0 }
-        };
+        var scores = Enum.GetValues(typeof(ClientBranch))
+                        .Cast<ClientBranch>()
+                        .ToDictionary(branch => branch, _ => 0);
 
-        // Считаем веса
         foreach (var branch in BranchKeywords)
         {
             foreach (var keyword in branch.Value)
             {
-                foreach (var w in words)
+                foreach (var word in words)
                 {
-                    if (IsMatch(w, keyword))
+                    if (IsMatch(word, keyword))
+                        scores[branch.Key] += keyword.Weight;
+                }
+
+                // поддержка многословных фраз ("хочу оператора")
+                foreach (var syn in keyword.Synonyms)
+                {
+                    if (text.Contains(syn))
                         scores[branch.Key] += keyword.Weight;
                 }
             }
         }
 
-        // Определяем ветку с максимальным весом
         var maxScore = scores.Max(s => s.Value);
 
         if (maxScore == 0)
@@ -92,34 +116,30 @@ public static class ClientRouter
         return scores.First(s => s.Value == maxScore).Key;
     }
 
-    // Простая нормализация слова (морфология)
     private static string NormalizeWord(string word)
     {
         word = word.ToLower();
 
-        // Убираем окончания (упрощённая лемматизация)
-        string[] endings = { "у", "ю", "е", "а", "ы", "и", "ой", "ей", "ом", "ем", "ях", "ам", "ям", "ах" };
+        string[] endings = { "у", "ю", "е", "а", "ы", "и", "ой", "ей", "ом", "ем", "ях", "ам", "ям", "ах", "ов", "ев" };
 
         foreach (var end in endings)
         {
             if (word.EndsWith(end) && word.Length > end.Length + 2)
-                return word.Substring(0, word.Length - end.Length);
+                return word[..^end.Length];
         }
 
         return word;
     }
 
-    // Проверяем совпадение с ключом или синонимами
     private static bool IsMatch(string word, WeightedKeyword keyword)
     {
-        // Приводим все слова к канонической форме
-        var allForms = new List<string>
+        var forms = new List<string>
         {
             NormalizeWord(keyword.Canonical)
         };
-        allForms.AddRange(keyword.Synonyms.Select(NormalizeWord));
 
-        // Совпадение по вхождению
-        return allForms.Any(form => word.Contains(form));
+        forms.AddRange(keyword.Synonyms.Select(NormalizeWord));
+
+        return forms.Any(f => f.Length > 2 && word.Contains(f));
     }
 }
