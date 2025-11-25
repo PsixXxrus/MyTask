@@ -1,103 +1,125 @@
 using System;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
 
-public class YandexSpeechKitClient
+public enum ClientBranch
 {
-    private readonly HttpClient _httpClient;
+    Purchase,
+    Complaint,
+    Question,
+    Unknown
+}
 
-    public YandexSpeechKitClient(HttpClient httpClient)
-    {
-        _httpClient = httpClient;
-    }
+public class WeightedKeyword
+{
+    public string Canonical { get; set; }          // Основная форма слова
+    public int Weight { get; set; }               // Вес ключа
+    public List<string> Synonyms { get; set; }    // Синонимы
+}
 
-    /// <summary>
-    /// Делает запрос к utteranceSynthesis и возвращает сырой JSON + байты аудио.
-    /// </summary>
-    public async Task<(string json, byte[] file)> SynthesizeAsync(
-        string text,
-        string voice,
-        string iamToken,
-        string folderId,
-        CancellationToken cancellationToken = default)
-    {
-        // URL из доки utteranceSynthesis REST v3
-        var url = "https://tts.api.cloud.yandex.net/tts/v3/utteranceSynthesis";
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, url);
-
-        // Авторизация: либо через IAM-токен в Authorization, либо через X-YaCloud-SubjectToken.
-        // Оставь тот вариант, который ты уже используешь.
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", iamToken);
-        request.Headers.Add("x-folder-id", folderId);
-
-        // Тело строго по доке (camelCase имена полей!):
-        var bodyObject = new
+public static class ClientRouter
+{
+    private static readonly Dictionary<ClientBranch, List<WeightedKeyword>> BranchKeywords =
+        new()
         {
-            // model можно не указывать, если не используешь кастомные голоса
-            // model = "some-model-name",
-
-            text = text,
-
-            hints = new[]
             {
-                new
+                ClientBranch.Purchase, new List<WeightedKeyword>
                 {
-                    voice = voice
-                    // Можно добавить speed, volume, role и т.д., но только ОДНО из них одновременно с voice
+                    new() { Canonical = "купить", Weight = 5, Synonyms = new() { "покупка", "куплю", "приобрести", "заказать", "оплатить" } },
+                    new() { Canonical = "цена", Weight = 3, Synonyms = new() { "стоимость", "скидка" } }
                 }
             },
-
-            outputAudioSpec = new
             {
-                // Пример: WAV
-                containerAudio = new
+                ClientBranch.Complaint, new List<WeightedKeyword>
                 {
-                    containerAudioType = "WAV"
-                    // варианты: "WAV", "OGG_OPUS", "MP3"
+                    new() { Canonical = "проблема", Weight = 5, Synonyms = new() { "ошибка", "не работает", "сломалось", "не могу", "не получается" } },
+                    new() { Canonical = "жалоба", Weight = 4, Synonyms = new() { "недовольство", "претензия" } }
                 }
-                // либо rawAudio = new { audioEncoding = "LINEAR16_PCM", sampleRateHertz = "48000" }
             },
-
-            // loudnessNormalizationType = "LUFS", // по умолчанию LUFS
-            unsafeMode = false
+            {
+                ClientBranch.Question, new List<WeightedKeyword>
+                {
+                    new() { Canonical = "как", Weight = 3, Synonyms = new() { "каким образом" } },
+                    new() { Canonical = "что", Weight = 2, Synonyms = new() { "какой", "какая", "какие" } },
+                    new() { Canonical = "почему", Weight = 3, Synonyms = new() { "зачем", "по какой причине" } },
+                    new() { Canonical = "подскажите", Weight = 4, Synonyms = new() { "интересует", "объясните", "хочу узнать" } }
+                }
+            }
         };
 
-        var jsonBody = JsonSerializer.Serialize(bodyObject);
-        request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+    private static readonly Regex WordRegex = new(@"[а-яА-ЯёЁa-zA-Z]+", RegexOptions.Compiled);
 
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+    public static ClientBranch DetectBranch(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return ClientBranch.Unknown;
 
-        if (!response.IsSuccessStatusCode)
+        string text = message.ToLower();
+
+        // Разбиваем на слова
+        var words = WordRegex.Matches(text)
+                             .Select(m => NormalizeWord(m.Value))
+                             .Where(w => !string.IsNullOrWhiteSpace(w))
+                             .ToList();
+
+        var scores = new Dictionary<ClientBranch, int>
         {
-            // Здесь ты сразу увидишь, что именно не нравится API (message, details и т.п.)
-            throw new InvalidOperationException(
-                $"TTS request failed with status {(int)response.StatusCode} ({response.StatusCode}). " +
-                $"Body: {responseJson}");
-        }
+            { ClientBranch.Purchase, 0 },
+            { ClientBranch.Complaint, 0 },
+            { ClientBranch.Question, 0 }
+        };
 
-        // Парсим JSON и достаем audioChunk.data (base64)
-        using var doc = JsonDocument.Parse(responseJson);
-        var root = doc.RootElement;
-
-        byte[] audioBytes = Array.Empty<byte>();
-
-        if (root.TryGetProperty("audioChunk", out var audioChunkElement) &&
-            audioChunkElement.TryGetProperty("data", out var dataElement))
+        // Считаем веса
+        foreach (var branch in BranchKeywords)
         {
-            var base64 = dataElement.GetString();
-            if (!string.IsNullOrEmpty(base64))
+            foreach (var keyword in branch.Value)
             {
-                audioBytes = Convert.FromBase64String(base64);
+                foreach (var w in words)
+                {
+                    if (IsMatch(w, keyword))
+                        scores[branch.Key] += keyword.Weight;
+                }
             }
         }
 
-        // Возвращаем и сырой JSON, и байты файла
-        return (responseJson, audioBytes);
+        // Определяем ветку с максимальным весом
+        var maxScore = scores.Max(s => s.Value);
+
+        if (maxScore == 0)
+            return ClientBranch.Unknown;
+
+        return scores.First(s => s.Value == maxScore).Key;
+    }
+
+    // Простая нормализация слова (морфология)
+    private static string NormalizeWord(string word)
+    {
+        word = word.ToLower();
+
+        // Убираем окончания (упрощённая лемматизация)
+        string[] endings = { "у", "ю", "е", "а", "ы", "и", "ой", "ей", "ом", "ем", "ях", "ам", "ям", "ах" };
+
+        foreach (var end in endings)
+        {
+            if (word.EndsWith(end) && word.Length > end.Length + 2)
+                return word.Substring(0, word.Length - end.Length);
+        }
+
+        return word;
+    }
+
+    // Проверяем совпадение с ключом или синонимами
+    private static bool IsMatch(string word, WeightedKeyword keyword)
+    {
+        // Приводим все слова к канонической форме
+        var allForms = new List<string>
+        {
+            NormalizeWord(keyword.Canonical)
+        };
+        allForms.AddRange(keyword.Synonyms.Select(NormalizeWord));
+
+        // Совпадение по вхождению
+        return allForms.Any(form => word.Contains(form));
     }
 }
