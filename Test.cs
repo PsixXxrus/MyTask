@@ -1,297 +1,65 @@
-using System;
-using System.Collections.Concurrent;
-using System.IO;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Text.Json;
-using System.Threading;
+{
+  "ConnectionStrings": {
+    "OracleDb": "User Id=USER;Password=PASS;Data Source=YOUR_ORACLE_HOST:1521/ORCL;"
+  }
+}
+
+using System.Data;
 using System.Threading.Tasks;
 
-/// <summary>
-/// Уровни логирования.
-/// </summary>
-public enum LogLevel
+public interface IOracleService
 {
-    Debug,
-    Info,
-    Success,
-    Warning,
-    Error,
-    Critical
+    Task<DataTable> QueryAsync(string sql, params OracleParameter[] parameters);
+    Task<int> ExecuteAsync(string sql, params OracleParameter[] parameters);
 }
 
-/// <summary>
-/// Типы логов — определяют папку для записи.
-/// </summary>
-public enum LogType
+using Oracle.ManagedDataAccess.Client;
+using System.Data;
+using System.Threading.Tasks;
+
+public class OracleService : IOracleService
 {
-    Init,
-    Services,
-    Database
-}
+    private readonly string _connectionString;
 
-/// <summary>
-/// Настройки логгера.
-/// </summary>
-public class LoggerOptions
-{
-    public bool EnableDebug { get; set; } = true;
-    public bool EnableInfo { get; set; } = true;
-    public bool EnableSuccess { get; set; } = true;
-    public bool EnableWarning { get; set; } = true;
-    public bool EnableError { get; set; } = true;
-    public bool EnableCritical { get; set; } = true;
-
-    /// <summary>Писать лог в JSON формате.</summary>
-    public bool EnableJson { get; set; } = false;
-
-    /// <summary>Красивый JSON с отступами.</summary>
-    public bool PrettyJson { get; set; } = true;
-
-    /// <summary>Корневая папка логов.</summary>
-    public string BasePath { get; set; } = "logs";
-
-    /// <summary>Сколько дней хранить логи.</summary>
-    public int RetentionDays { get; set; } = 7;
-}
-
-/// <summary>
-/// Асинхронный потокобезопасный логгер с LogType.
-/// </summary>
-public static class Logger
-{
-    private static readonly BlockingCollection<string> _queue = new();
-
-    private static LoggerOptions _options;
-    private static Task _writerTask;
-    private static bool _running;
-    private static bool _initialized;
-
-    /// <summary>
-    /// Инициализация логгера. Вызывается один раз.
-    /// </summary>
-    public static void Init(LoggerOptions options)
+    public OracleService(IConfiguration config)
     {
-        if (_initialized)
-            return;
-
-        _initialized = true;
-        _options = options;
-
-        foreach (var type in Enum.GetValues<LogType>())
-        {
-            string dir = Path.Combine(_options.BasePath, type.ToString().ToLower());
-            Directory.CreateDirectory(dir);
-        }
-
-        CleanupOldLogs();
-
-        _running = true;
-        _writerTask = Task.Run(ProcessQueue);
-
-        Info(LogType.Init, "Logger initialized");
+        _connectionString = config.GetConnectionString("OracleDb");
     }
 
     /// <summary>
-    /// Основной метод логирования.
+    /// Выполняет SELECT запрос и возвращает DataTable.
     /// </summary>
-    public static void Log(
-        LogType type,
-        LogLevel level,
-        string message,
-        [CallerMemberName] string caller = "",
-        [CallerFilePath] string filePath = "")
+    public async Task<DataTable> QueryAsync(string sql, params OracleParameter[] parameters)
     {
-        if (!_initialized)
-            Init(new LoggerOptions());
+        var table = new DataTable();
 
-        if (!IsEnabled(level))
-            return;
+        using var conn = new OracleConnection(_connectionString);
+        using var cmd = new OracleCommand(sql, conn);
 
-        string className = Path.GetFileNameWithoutExtension(filePath);
-        string time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+        if (parameters != null)
+            cmd.Parameters.AddRange(parameters);
 
-        string formatted =
-            $"[{time}] [{type}] [{level}] [{className}.{caller}] {message}";
+        await conn.OpenAsync();
 
-        WriteToConsole(level, formatted);
+        using var reader = await cmd.ExecuteReaderAsync();
+        table.Load(reader);
 
-        string content;
-
-        if (_options.EnableJson)
-        {
-            var jsonObj = new
-            {
-                time,
-                type = type.ToString(),
-                level = level.ToString(),
-                className,
-                method = caller,
-                message
-            };
-
-            var jsonOptions = new JsonSerializerOptions
-            {
-                WriteIndented = _options.PrettyJson,
-                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-            };
-
-            content = JsonSerializer.Serialize(jsonObj, jsonOptions);
-        }
-        else
-        {
-            content = formatted;
-        }
-
-        _queue.Add(FormatForFile(type, content));
+        return table;
     }
 
     /// <summary>
-    /// Логирование исключений.
+    /// Выполняет INSERT, UPDATE, DELETE. Возвращает количество изменённых строк.
     /// </summary>
-    public static void Exception(
-        LogType type,
-        Exception ex,
-        string text = null,
-        [CallerMemberName] string caller = "",
-        [CallerFilePath] string filePath = "")
+    public async Task<int> ExecuteAsync(string sql, params OracleParameter[] parameters)
     {
-        var sb = new StringBuilder();
-        if (text != null)
-            sb.AppendLine(text);
+        using var conn = new OracleConnection(_connectionString);
+        using var cmd = new OracleCommand(sql, conn);
 
-        sb.AppendLine(ex.Message);
-        sb.AppendLine(ex.StackTrace);
+        if (parameters != null)
+            cmd.Parameters.AddRange(parameters);
 
-        if (ex.InnerException != null)
-        {
-            sb.AppendLine("Inner:");
-            sb.AppendLine(ex.InnerException.Message);
-            sb.AppendLine(ex.InnerException.StackTrace);
-        }
+        await conn.OpenAsync();
 
-        Log(type, LogLevel.Error, sb.ToString(), caller, filePath);
-    }
-
-    // ───────────────────────────────────────────────────────────────
-    // Упрощённые методы
-    // ───────────────────────────────────────────────────────────────
-
-    public static void Info(LogType type, string msg,
-        [CallerMemberName] string caller = "",
-        [CallerFilePath] string filePath = "") =>
-        Log(type, LogLevel.Info, msg, caller, filePath);
-
-    public static void Success(LogType type, string msg,
-        [CallerMemberName] string caller = "",
-        [CallerFilePath] string filePath = "") =>
-        Log(type, LogLevel.Success, msg, caller, filePath);
-
-    public static void Warning(LogType type, string msg,
-        [CallerMemberName] string caller = "",
-        [CallerFilePath] string filePath = "") =>
-        Log(type, LogLevel.Warning, msg, caller, filePath);
-
-    public static void Error(LogType type, string msg,
-        [CallerMemberName] string caller = "",
-        [CallerFilePath] string filePath = "") =>
-        Log(type, LogLevel.Error, msg, caller, filePath);
-
-    public static void Critical(LogType type, string msg,
-        [CallerMemberName] string caller = "",
-        [CallerFilePath] string filePath = "") =>
-        Log(type, LogLevel.Critical, msg, caller, filePath);
-
-    public static void Debug(LogType type, string msg,
-        [CallerMemberName] string caller = "",
-        [CallerFilePath] string filePath = "") =>
-        Log(type, LogLevel.Debug, msg, caller, filePath);
-
-    // ───────────────────────────────────────────────────────────────
-
-    private static bool IsEnabled(LogLevel level) =>
-        level switch
-        {
-            LogLevel.Debug    => _options.EnableDebug,
-            LogLevel.Info     => _options.EnableInfo,
-            LogLevel.Success  => _options.EnableSuccess,
-            LogLevel.Warning  => _options.EnableWarning,
-            LogLevel.Error    => _options.EnableError,
-            LogLevel.Critical => _options.EnableCritical,
-            _ => true
-        };
-
-    private static string FormatForFile(LogType type, string line)
-    {
-        string folder = Path.Combine(_options.BasePath, type.ToString().ToLower());
-        string file = Path.Combine(folder, $"{DateTime.Now:yyyy-MM-dd}.log");
-
-        CleanupOldLogs();
-
-        return file + "||" + line;
-    }
-
-    private static async Task ProcessQueue()
-    {
-        foreach (var entry in _queue.GetConsumingEnumerable())
-        {
-            if (!_running && _queue.Count == 0)
-                break;
-
-            var parts = entry.Split("||", 2);
-            string filePath = parts[0];
-            string text = parts[1];
-
-            try
-            {
-                await File.AppendAllTextAsync(filePath, text + Environment.NewLine);
-            }
-            catch
-            {
-                Thread.Sleep(20);
-                await File.AppendAllTextAsync(filePath, text + Environment.NewLine);
-            }
-        }
-    }
-
-    /// <summary>Удаляет старые логи.</summary>
-    private static void CleanupOldLogs()
-    {
-        foreach (var type in Enum.GetValues<LogType>())
-        {
-            string folder = Path.Combine(_options.BasePath, type.ToString().ToLower());
-            if (!Directory.Exists(folder))
-                continue;
-
-            foreach (string file in Directory.GetFiles(folder, "*.log"))
-            {
-                try
-                {
-                    var creation = File.GetCreationTime(file);
-                    if ((DateTime.Now - creation).TotalDays > _options.RetentionDays)
-                        File.Delete(file);
-                }
-                catch { }
-            }
-        }
-    }
-
-    private static void WriteToConsole(LogLevel level, string text)
-    {
-        ConsoleColor color = level switch
-        {
-            LogLevel.Info     => ConsoleColor.White,
-            LogLevel.Success  => ConsoleColor.Green,
-            LogLevel.Warning  => ConsoleColor.Yellow,
-            LogLevel.Error    => ConsoleColor.Red,
-            LogLevel.Critical => ConsoleColor.DarkRed,
-            LogLevel.Debug    => ConsoleColor.Cyan,
-            _ => ConsoleColor.Gray
-        };
-
-        var prev = Console.ForegroundColor;
-        Console.ForegroundColor = color;
-        Console.WriteLine(text);
-        Console.ForegroundColor = prev;
+        return await cmd.ExecuteNonQueryAsync();
     }
 }
