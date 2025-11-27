@@ -19,7 +19,7 @@ public enum LogLevel
 }
 
 /// <summary>
-/// Типы логов — определяют, в какую папку писать.
+/// Типы логов — определяют папку для записи.
 /// </summary>
 public enum LogType
 {
@@ -29,38 +29,27 @@ public enum LogType
 }
 
 /// <summary>
-/// Конфигурация логгера.
+/// Настройки логгера.
 /// </summary>
 public class LoggerOptions
 {
-    /// <summary> Включить логирование Debug. </summary>
     public bool EnableDebug { get; set; } = true;
-
-    /// <summary> Включить логирование Info. </summary>
     public bool EnableInfo { get; set; } = true;
-
-    /// <summary> Включить логирование Warning. </summary>
     public bool EnableWarning { get; set; } = true;
-
-    /// <summary> Включить логирование Error. </summary>
     public bool EnableError { get; set; } = true;
 
-    /// <summary> Писать ли логи в JSON-формате. </summary>
     public bool EnableJson { get; set; } = false;
 
-    /// <summary> Корневая папка для логов. </summary>
     public string BasePath { get; set; } = "logs";
 
-    /// <summary> Количество дней, в течение которых хранятся логи. </summary>
     public int RetentionDays { get; set; } = 7;
 }
 
 /// <summary>
-/// Асинхронный потокобезопасный логгер с поддержкой JSON, ротации, auto-caller-info.
+/// Асинхронный потокобезопасный логгер с LogType.
 /// </summary>
 public static class Logger
 {
-    /// <summary> Очередь сообщений для асинхронной записи. </summary>
     private static readonly BlockingCollection<string> _queue = new();
 
     private static LoggerOptions _options;
@@ -69,7 +58,7 @@ public static class Logger
     private static bool _initialized;
 
     /// <summary>
-    /// Инициализирует логгер. Вызывается один раз при старте приложения.
+    /// Инициализация логгера (однократная).
     /// </summary>
     public static void Init(LoggerOptions options)
     {
@@ -79,43 +68,23 @@ public static class Logger
         _initialized = true;
         _options = options;
 
-        // Создание папок по типам логов
         foreach (var type in Enum.GetValues<LogType>())
         {
             string dir = Path.Combine(_options.BasePath, type.ToString().ToLower());
-            if (!Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
+            Directory.CreateDirectory(dir);
         }
 
-        // Очистка старых файлов
         CleanupOldLogs();
 
         _running = true;
-
-        // Фоновая задача для записи логов в файл
         _writerTask = Task.Run(ProcessQueue);
 
-        Log(LogType.Init, LogLevel.Info, "Logger initialized");
-    }
-
-    /// <summary>
-    /// Корректно останавливает логгер и дописывает все очереди.
-    /// </summary>
-    public static void Stop()
-    {
-        _running = false;
-        _queue.CompleteAdding();
-        _writerTask?.Wait();
+        Info(LogType.Init, "Logger initialized");
     }
 
     /// <summary>
     /// Основной метод логирования.
     /// </summary>
-    /// <param name="type">Тип лога (папка).</param>
-    /// <param name="level">Уровень логирования.</param>
-    /// <param name="message">Сообщение.</param>
-    /// <param name="caller">Автоматически: имя метода.</param>
-    /// <param name="filePath">Автоматически: путь к файлу-вызывателю.</param>
     public static void Log(
         LogType type,
         LogLevel level,
@@ -124,7 +93,7 @@ public static class Logger
         [CallerFilePath] string filePath = "")
     {
         if (!_initialized)
-            Init(new LoggerOptions()); // автоинициализация по умолчанию
+            Init(new LoggerOptions());
 
         if (!IsEnabled(level))
             return;
@@ -132,14 +101,11 @@ public static class Logger
         string className = Path.GetFileNameWithoutExtension(filePath);
         string time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
 
-        // Читабельный текстовый формат
-        string textLine =
+        string formatted =
             $"[{time}] [{type}] [{level}] [{className}.{caller}] {message}";
 
-        // Вывод в консоль
-        WriteToConsole(level, textLine);
+        WriteToConsole(level, formatted);
 
-        // Выбор формата JSON/PLAIN
         string content = _options.EnableJson
             ? JsonSerializer.Serialize(new
             {
@@ -150,31 +116,31 @@ public static class Logger
                 method = caller,
                 message
             })
-            : textLine;
+            : formatted;
 
-        // Добавляем в очередь
         _queue.Add(FormatForFile(type, content));
     }
 
     /// <summary>
-    /// Логирование исключений с автоматическим сбором StackTrace.
+    /// Упрощённое логирование исключений.
     /// </summary>
-    public static void LogException(
+    public static void Exception(
         LogType type,
         Exception ex,
-        string message = null,
+        string text = null,
         [CallerMemberName] string caller = "",
         [CallerFilePath] string filePath = "")
     {
         var sb = new StringBuilder();
+        if (text != null)
+            sb.AppendLine(text);
 
-        sb.AppendLine(message ?? "Exception occurred");
         sb.AppendLine(ex.Message);
         sb.AppendLine(ex.StackTrace);
 
         if (ex.InnerException != null)
         {
-            sb.AppendLine("Inner Exception:");
+            sb.AppendLine("Inner:");
             sb.AppendLine(ex.InnerException.Message);
             sb.AppendLine(ex.InnerException.StackTrace);
         }
@@ -182,9 +148,32 @@ public static class Logger
         Log(type, LogLevel.Error, sb.ToString(), caller, filePath);
     }
 
-    /// <summary>
-    /// Проверка, включён ли уровень логов.
-    /// </summary>
+    // ───────────────────────────────────────────────────────────────
+    // Удобные короткие методы
+    // ───────────────────────────────────────────────────────────────
+
+    public static void Info(LogType type, string msg,
+        [CallerMemberName] string caller = "",
+        [CallerFilePath] string filePath = "") =>
+        Log(type, LogLevel.Info, msg, caller, filePath);
+
+    public static void Warning(LogType type, string msg,
+        [CallerMemberName] string caller = "",
+        [CallerFilePath] string filePath = "") =>
+        Log(type, LogLevel.Warning, msg, caller, filePath);
+
+    public static void Error(LogType type, string msg,
+        [CallerMemberName] string caller = "",
+        [CallerFilePath] string filePath = "") =>
+        Log(type, LogLevel.Error, msg, caller, filePath);
+
+    public static void Debug(LogType type, string msg,
+        [CallerMemberName] string caller = "",
+        [CallerFilePath] string filePath = "") =>
+        Log(type, LogLevel.Debug, msg, caller, filePath);
+
+    // ───────────────────────────────────────────────────────────────
+
     private static bool IsEnabled(LogLevel level) =>
         level switch
         {
@@ -195,26 +184,19 @@ public static class Logger
             _ => true
         };
 
-    /// <summary>
-    /// Формирует запись вида "путь||сообщение".
-    /// </summary>
     private static string FormatForFile(LogType type, string line)
     {
         string folder = Path.Combine(_options.BasePath, type.ToString().ToLower());
         string file = Path.Combine(folder, $"{DateTime.Now:yyyy-MM-dd}.log");
 
-        // Ежедневная ротация + удаление старых логов
         CleanupOldLogs();
 
         return file + "||" + line;
     }
 
-    /// <summary>
-    /// Фоновая асинхронная запись очереди в файлы.
-    /// </summary>
     private static async Task ProcessQueue()
     {
-        foreach (string entry in _queue.GetConsumingEnumerable())
+        foreach (var entry in _queue.GetConsumingEnumerable())
         {
             if (!_running && _queue.Count == 0)
                 break;
@@ -229,16 +211,13 @@ public static class Logger
             }
             catch
             {
-                // Повторная попытка через паузу
-                Thread.Sleep(10);
+                Thread.Sleep(20);
                 await File.AppendAllTextAsync(filePath, text + Environment.NewLine);
             }
         }
     }
 
-    /// <summary>
-    /// Удаляет файлы логов старше RetentionDays.
-    /// </summary>
+    /// <summary>Удаляет логи старше RetentionDays.</summary>
     private static void CleanupOldLogs()
     {
         foreach (var type in Enum.GetValues<LogType>())
@@ -247,29 +226,20 @@ public static class Logger
             if (!Directory.Exists(folder))
                 continue;
 
-            var files = Directory.GetFiles(folder, "*.log");
-
-            foreach (var file in files)
+            foreach (string file in Directory.GetFiles(folder, "*.log"))
             {
                 try
                 {
                     var creation = File.GetCreationTime(file);
-
                     if ((DateTime.Now - creation).TotalDays > _options.RetentionDays)
                         File.Delete(file);
                 }
-                catch
-                {
-                    // Игнорируем ошибки удаления, логгер не должен падать
-                }
+                catch { }
             }
         }
     }
 
-    /// <summary>
-    /// Цветной вывод в консоль в зависимости от уровня логирования.
-    /// </summary>
-    private static void WriteToConsole(LogLevel level, string line)
+    private static void WriteToConsole(LogLevel level, string text)
     {
         ConsoleColor color = level switch
         {
@@ -280,9 +250,9 @@ public static class Logger
             _ => ConsoleColor.Gray
         };
 
-        var previous = Console.ForegroundColor;
+        var prev = Console.ForegroundColor;
         Console.ForegroundColor = color;
-        Console.WriteLine(line);
-        Console.ForegroundColor = previous;
+        Console.WriteLine(text);
+        Console.ForegroundColor = prev;
     }
 }
