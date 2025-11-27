@@ -1,145 +1,288 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
+using System.IO;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
-public enum ClientBranch
+/// <summary>
+/// Уровни логирования.
+/// </summary>
+public enum LogLevel
 {
-    BankCards,
-    BusinessServices,
-    SecuritiesMarket,
-    ProductsInfo,
-    Operator,
-    Unknown
+    Debug,
+    Info,
+    Warning,
+    Error
 }
 
-public class WeightedKeyword
+/// <summary>
+/// Типы логов — определяют, в какую папку писать.
+/// </summary>
+public enum LogType
 {
-    public string Canonical { get; set; }
-    public int Weight { get; set; }
-    public List<string> Synonyms { get; set; }
+    Init,
+    Services,
+    Database
 }
 
-public static class ClientRouter
+/// <summary>
+/// Конфигурация логгера.
+/// </summary>
+public class LoggerOptions
 {
-    private static readonly Dictionary<ClientBranch, List<WeightedKeyword>> BranchKeywords =
-        new()
+    /// <summary> Включить логирование Debug. </summary>
+    public bool EnableDebug { get; set; } = true;
+
+    /// <summary> Включить логирование Info. </summary>
+    public bool EnableInfo { get; set; } = true;
+
+    /// <summary> Включить логирование Warning. </summary>
+    public bool EnableWarning { get; set; } = true;
+
+    /// <summary> Включить логирование Error. </summary>
+    public bool EnableError { get; set; } = true;
+
+    /// <summary> Писать ли логи в JSON-формате. </summary>
+    public bool EnableJson { get; set; } = false;
+
+    /// <summary> Корневая папка для логов. </summary>
+    public string BasePath { get; set; } = "logs";
+
+    /// <summary> Количество дней, в течение которых хранятся логи. </summary>
+    public int RetentionDays { get; set; } = 7;
+}
+
+/// <summary>
+/// Асинхронный потокобезопасный логгер с поддержкой JSON, ротации, auto-caller-info.
+/// </summary>
+public static class Logger
+{
+    /// <summary> Очередь сообщений для асинхронной записи. </summary>
+    private static readonly BlockingCollection<string> _queue = new();
+
+    private static LoggerOptions _options;
+    private static Task _writerTask;
+    private static bool _running;
+    private static bool _initialized;
+
+    /// <summary>
+    /// Инициализирует логгер. Вызывается один раз при старте приложения.
+    /// </summary>
+    public static void Init(LoggerOptions options)
+    {
+        if (_initialized)
+            return;
+
+        _initialized = true;
+        _options = options;
+
+        // Создание папок по типам логов
+        foreach (var type in Enum.GetValues<LogType>())
         {
+            string dir = Path.Combine(_options.BasePath, type.ToString().ToLower());
+            if (!Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+        }
+
+        // Очистка старых файлов
+        CleanupOldLogs();
+
+        _running = true;
+
+        // Фоновая задача для записи логов в файл
+        _writerTask = Task.Run(ProcessQueue);
+
+        Log(LogType.Init, LogLevel.Info, "Logger initialized");
+    }
+
+    /// <summary>
+    /// Корректно останавливает логгер и дописывает все очереди.
+    /// </summary>
+    public static void Stop()
+    {
+        _running = false;
+        _queue.CompleteAdding();
+        _writerTask?.Wait();
+    }
+
+    /// <summary>
+    /// Основной метод логирования.
+    /// </summary>
+    /// <param name="type">Тип лога (папка).</param>
+    /// <param name="level">Уровень логирования.</param>
+    /// <param name="message">Сообщение.</param>
+    /// <param name="caller">Автоматически: имя метода.</param>
+    /// <param name="filePath">Автоматически: путь к файлу-вызывателю.</param>
+    public static void Log(
+        LogType type,
+        LogLevel level,
+        string message,
+        [CallerMemberName] string caller = "",
+        [CallerFilePath] string filePath = "")
+    {
+        if (!_initialized)
+            Init(new LoggerOptions()); // автоинициализация по умолчанию
+
+        if (!IsEnabled(level))
+            return;
+
+        string className = Path.GetFileNameWithoutExtension(filePath);
+        string time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+
+        // Читабельный текстовый формат
+        string textLine =
+            $"[{time}] [{type}] [{level}] [{className}.{caller}] {message}";
+
+        // Вывод в консоль
+        WriteToConsole(level, textLine);
+
+        // Выбор формата JSON/PLAIN
+        string content = _options.EnableJson
+            ? JsonSerializer.Serialize(new
             {
-                ClientBranch.BankCards,
-                new List<WeightedKeyword>
-                {
-                    new() { Canonical = "карта", Weight = 5, Synonyms = new(){ "дебетовая", "кредитка", "кредитная", "дебетка", "карточка", "visa", "mastercard", "мир" } },
-                    new() { Canonical = "платёж", Weight = 3, Synonyms = new(){ "оплата", "транзакция", "списание" } },
-                    new() { Canonical = "лимит", Weight = 3, Synonyms = new(){ "ограничение", "лимиты" } }
-                }
-            },
-            {
-                ClientBranch.BusinessServices,
-                new List<WeightedKeyword>
-                {
-                    new() { Canonical = "юридический", Weight = 5, Synonyms = new(){ "юрлицо", "юр лица", "компания", "организация", "ип", "ооо" } },
-                    new() { Canonical = "рсчёт", Weight = 5, Synonyms = new(){ "расчетный", "рс", "расчетный счет", "расчётный счёт" } },
-                    new() { Canonical = "эквайринг", Weight = 4, Synonyms = new(){ "терминал", "торговый эквайринг" } },
-                    new() { Canonical = "зппроект", Weight = 3, Synonyms = new(){ "зарплатный проект" } }
-                }
-            },
-            {
-                ClientBranch.SecuritiesMarket,
-                new List<WeightedKeyword>
-                {
-                    new() { Canonical = "акция", Weight = 5, Synonyms = new(){ "облигация", "ценная бумага", "ценные бумаги", "фондовый", "биржа" } },
-                    new() { Canonical = "инвест", Weight = 4, Synonyms = new(){ "инвестиция", "инвестиции", "инвестирование", "портфель" } },
-                    new() { Canonical = "брокер", Weight = 4, Synonyms = new(){ "брокерский", "брокерский счёт" } }
-                }
-            },
-            {
-                ClientBranch.ProductsInfo,
-                new List<WeightedKeyword>
-                {
-                    new() { Canonical = "продукт", Weight = 3, Synonyms = new(){ "услуга", "программа", "предложение" } },
-                    new() { Canonical = "кредит", Weight = 4, Synonyms = new(){ "ипотека", "займ", "потреб", "потребительский", "ставка" } },
-                    new() { Canonical = "вклад", Weight = 4, Synonyms = new(){ "депозит", "накопительный", "процент", "сберегательный" } }
-                }
-            },
-            {
-                ClientBranch.Operator,
-                new List<WeightedKeyword>
-                {
-                    new() { Canonical = "оператор", Weight = 10, Synonyms = new(){ "живой человек", "сотрудник", "переведи", "переведите", "хочу оператора", "менеджер" } },
-                    new() { Canonical = "человек", Weight = 8, Synonyms = new(){ "специалист", "консультант" } }
-                }
-            }
+                time,
+                type = type.ToString(),
+                level = level.ToString(),
+                className,
+                method = caller,
+                message
+            })
+            : textLine;
+
+        // Добавляем в очередь
+        _queue.Add(FormatForFile(type, content));
+    }
+
+    /// <summary>
+    /// Логирование исключений с автоматическим сбором StackTrace.
+    /// </summary>
+    public static void LogException(
+        LogType type,
+        Exception ex,
+        string message = null,
+        [CallerMemberName] string caller = "",
+        [CallerFilePath] string filePath = "")
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine(message ?? "Exception occurred");
+        sb.AppendLine(ex.Message);
+        sb.AppendLine(ex.StackTrace);
+
+        if (ex.InnerException != null)
+        {
+            sb.AppendLine("Inner Exception:");
+            sb.AppendLine(ex.InnerException.Message);
+            sb.AppendLine(ex.InnerException.StackTrace);
+        }
+
+        Log(type, LogLevel.Error, sb.ToString(), caller, filePath);
+    }
+
+    /// <summary>
+    /// Проверка, включён ли уровень логов.
+    /// </summary>
+    private static bool IsEnabled(LogLevel level) =>
+        level switch
+        {
+            LogLevel.Debug => _options.EnableDebug,
+            LogLevel.Info => _options.EnableInfo,
+            LogLevel.Warning => _options.EnableWarning,
+            LogLevel.Error => _options.EnableError,
+            _ => true
         };
 
-    private static readonly Regex WordRegex = new(@"[а-яА-ЯёЁa-zA-Z]+", RegexOptions.Compiled);
-
-    public static ClientBranch DetectBranch(string message)
+    /// <summary>
+    /// Формирует запись вида "путь||сообщение".
+    /// </summary>
+    private static string FormatForFile(LogType type, string line)
     {
-        if (string.IsNullOrWhiteSpace(message))
-            return ClientBranch.Unknown;
+        string folder = Path.Combine(_options.BasePath, type.ToString().ToLower());
+        string file = Path.Combine(folder, $"{DateTime.Now:yyyy-MM-dd}.log");
 
-        string text = message.ToLower();
-        var words = WordRegex.Matches(text)
-                             .Select(m => NormalizeWord(m.Value))
-                             .Where(w => !string.IsNullOrWhiteSpace(w))
-                             .ToList();
+        // Ежедневная ротация + удаление старых логов
+        CleanupOldLogs();
 
-        var scores = Enum.GetValues(typeof(ClientBranch))
-                        .Cast<ClientBranch>()
-                        .ToDictionary(branch => branch, _ => 0);
+        return file + "||" + line;
+    }
 
-        foreach (var branch in BranchKeywords)
+    /// <summary>
+    /// Фоновая асинхронная запись очереди в файлы.
+    /// </summary>
+    private static async Task ProcessQueue()
+    {
+        foreach (string entry in _queue.GetConsumingEnumerable())
         {
-            foreach (var keyword in branch.Value)
-            {
-                foreach (var word in words)
-                {
-                    if (IsMatch(word, keyword))
-                        scores[branch.Key] += keyword.Weight;
-                }
+            if (!_running && _queue.Count == 0)
+                break;
 
-                // поддержка многословных фраз ("хочу оператора")
-                foreach (var syn in keyword.Synonyms)
+            var parts = entry.Split("||", 2);
+            string filePath = parts[0];
+            string text = parts[1];
+
+            try
+            {
+                await File.AppendAllTextAsync(filePath, text + Environment.NewLine);
+            }
+            catch
+            {
+                // Повторная попытка через паузу
+                Thread.Sleep(10);
+                await File.AppendAllTextAsync(filePath, text + Environment.NewLine);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Удаляет файлы логов старше RetentionDays.
+    /// </summary>
+    private static void CleanupOldLogs()
+    {
+        foreach (var type in Enum.GetValues<LogType>())
+        {
+            string folder = Path.Combine(_options.BasePath, type.ToString().ToLower());
+            if (!Directory.Exists(folder))
+                continue;
+
+            var files = Directory.GetFiles(folder, "*.log");
+
+            foreach (var file in files)
+            {
+                try
                 {
-                    if (text.Contains(syn))
-                        scores[branch.Key] += keyword.Weight;
+                    var creation = File.GetCreationTime(file);
+
+                    if ((DateTime.Now - creation).TotalDays > _options.RetentionDays)
+                        File.Delete(file);
+                }
+                catch
+                {
+                    // Игнорируем ошибки удаления, логгер не должен падать
                 }
             }
         }
-
-        var maxScore = scores.Max(s => s.Value);
-
-        if (maxScore == 0)
-            return ClientBranch.Unknown;
-
-        return scores.First(s => s.Value == maxScore).Key;
     }
 
-    private static string NormalizeWord(string word)
+    /// <summary>
+    /// Цветной вывод в консоль в зависимости от уровня логирования.
+    /// </summary>
+    private static void WriteToConsole(LogLevel level, string line)
     {
-        word = word.ToLower();
-
-        string[] endings = { "у", "ю", "е", "а", "ы", "и", "ой", "ей", "ом", "ем", "ях", "ам", "ям", "ах", "ов", "ев" };
-
-        foreach (var end in endings)
+        ConsoleColor color = level switch
         {
-            if (word.EndsWith(end) && word.Length > end.Length + 2)
-                return word[..^end.Length];
-        }
-
-        return word;
-    }
-
-    private static bool IsMatch(string word, WeightedKeyword keyword)
-    {
-        var forms = new List<string>
-        {
-            NormalizeWord(keyword.Canonical)
+            LogLevel.Info => ConsoleColor.White,
+            LogLevel.Warning => ConsoleColor.Yellow,
+            LogLevel.Error => ConsoleColor.Red,
+            LogLevel.Debug => ConsoleColor.Cyan,
+            _ => ConsoleColor.Gray
         };
 
-        forms.AddRange(keyword.Synonyms.Select(NormalizeWord));
-
-        return forms.Any(f => f.Length > 2 && word.Contains(f));
+        var previous = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.WriteLine(line);
+        Console.ForegroundColor = previous;
     }
 }
