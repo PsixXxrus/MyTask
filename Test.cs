@@ -14,8 +14,10 @@ public enum LogLevel
 {
     Debug,
     Info,
+    Success,
     Warning,
-    Error
+    Error,
+    Critical
 }
 
 /// <summary>
@@ -35,13 +37,21 @@ public class LoggerOptions
 {
     public bool EnableDebug { get; set; } = true;
     public bool EnableInfo { get; set; } = true;
+    public bool EnableSuccess { get; set; } = true;
     public bool EnableWarning { get; set; } = true;
     public bool EnableError { get; set; } = true;
+    public bool EnableCritical { get; set; } = true;
 
+    /// <summary>Писать лог в JSON формате.</summary>
     public bool EnableJson { get; set; } = false;
 
+    /// <summary>Красивый JSON с отступами.</summary>
+    public bool PrettyJson { get; set; } = true;
+
+    /// <summary>Корневая папка логов.</summary>
     public string BasePath { get; set; } = "logs";
 
+    /// <summary>Сколько дней хранить логи.</summary>
     public int RetentionDays { get; set; } = 7;
 }
 
@@ -58,7 +68,7 @@ public static class Logger
     private static bool _initialized;
 
     /// <summary>
-    /// Инициализация логгера (однократная).
+    /// Инициализация логгера. Вызывается один раз.
     /// </summary>
     public static void Init(LoggerOptions options)
     {
@@ -106,8 +116,11 @@ public static class Logger
 
         WriteToConsole(level, formatted);
 
-        string content = _options.EnableJson
-            ? JsonSerializer.Serialize(new
+        string content;
+
+        if (_options.EnableJson)
+        {
+            var jsonObj = new
             {
                 time,
                 type = type.ToString(),
@@ -115,14 +128,26 @@ public static class Logger
                 className,
                 method = caller,
                 message
-            })
-            : formatted;
+            };
+
+            var jsonOptions = new JsonSerializerOptions
+            {
+                WriteIndented = _options.PrettyJson,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            };
+
+            content = JsonSerializer.Serialize(jsonObj, jsonOptions);
+        }
+        else
+        {
+            content = formatted;
+        }
 
         _queue.Add(FormatForFile(type, content));
     }
 
     /// <summary>
-    /// Упрощённое логирование исключений.
+    /// Логирование исключений.
     /// </summary>
     public static void Exception(
         LogType type,
@@ -149,13 +174,18 @@ public static class Logger
     }
 
     // ───────────────────────────────────────────────────────────────
-    // Удобные короткие методы
+    // Упрощённые методы
     // ───────────────────────────────────────────────────────────────
 
     public static void Info(LogType type, string msg,
         [CallerMemberName] string caller = "",
         [CallerFilePath] string filePath = "") =>
         Log(type, LogLevel.Info, msg, caller, filePath);
+
+    public static void Success(LogType type, string msg,
+        [CallerMemberName] string caller = "",
+        [CallerFilePath] string filePath = "") =>
+        Log(type, LogLevel.Success, msg, caller, filePath);
 
     public static void Warning(LogType type, string msg,
         [CallerMemberName] string caller = "",
@@ -167,6 +197,11 @@ public static class Logger
         [CallerFilePath] string filePath = "") =>
         Log(type, LogLevel.Error, msg, caller, filePath);
 
+    public static void Critical(LogType type, string msg,
+        [CallerMemberName] string caller = "",
+        [CallerFilePath] string filePath = "") =>
+        Log(type, LogLevel.Critical, msg, caller, filePath);
+
     public static void Debug(LogType type, string msg,
         [CallerMemberName] string caller = "",
         [CallerFilePath] string filePath = "") =>
@@ -177,10 +212,12 @@ public static class Logger
     private static bool IsEnabled(LogLevel level) =>
         level switch
         {
-            LogLevel.Debug => _options.EnableDebug,
-            LogLevel.Info => _options.EnableInfo,
-            LogLevel.Warning => _options.EnableWarning,
-            LogLevel.Error => _options.EnableError,
+            LogLevel.Debug    => _options.EnableDebug,
+            LogLevel.Info     => _options.EnableInfo,
+            LogLevel.Success  => _options.EnableSuccess,
+            LogLevel.Warning  => _options.EnableWarning,
+            LogLevel.Error    => _options.EnableError,
+            LogLevel.Critical => _options.EnableCritical,
             _ => true
         };
 
@@ -217,7 +254,7 @@ public static class Logger
         }
     }
 
-    /// <summary>Удаляет логи старше RetentionDays.</summary>
+    /// <summary>Удаляет старые логи.</summary>
     private static void CleanupOldLogs()
     {
         foreach (var type in Enum.GetValues<LogType>())
@@ -243,10 +280,12 @@ public static class Logger
     {
         ConsoleColor color = level switch
         {
-            LogLevel.Info => ConsoleColor.White,
-            LogLevel.Warning => ConsoleColor.Yellow,
-            LogLevel.Error => ConsoleColor.Red,
-            LogLevel.Debug => ConsoleColor.Cyan,
+            LogLevel.Info     => ConsoleColor.White,
+            LogLevel.Success  => ConsoleColor.Green,
+            LogLevel.Warning  => ConsoleColor.Yellow,
+            LogLevel.Error    => ConsoleColor.Red,
+            LogLevel.Critical => ConsoleColor.DarkRed,
+            LogLevel.Debug    => ConsoleColor.Cyan,
             _ => ConsoleColor.Gray
         };
 
